@@ -1,7 +1,7 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
-import { Plus, Trash2 } from "lucide-react";
+import { Plus, Trash2, RotateCcw } from "lucide-react";
 import { toast } from "sonner";
 import { AppShell } from "@/components/app-shell";
 import { Button } from "@/components/ui/button";
@@ -63,6 +63,7 @@ function TestAccountsPage() {
   const [open, setOpen] = useState(false);
   const [draft, setDraft] = useState({ instagram_user_id: "", name: "" });
   const [deleteTarget, setDeleteTarget] = useState<TestAccount | null>(null);
+  const [resetTarget, setResetTarget] = useState<TestAccount | null>(null);
 
   const accounts = useQuery({
     queryKey: ["test-accounts"],
@@ -129,6 +130,130 @@ function TestAccountsPage() {
     onError: (e: Error) => toast.error(e.message),
   });
 
+  const resetAccount = useMutation({
+    mutationFn: async (acc: TestAccount) => {
+      const igId = acc.instagram_user_id;
+
+      // 1. Find the customer record
+      const { data: customer, error: customerErr } = await supabase
+        .from("customers")
+        .select("id")
+        .eq("instagram_user_id", igId)
+        .maybeSingle();
+
+      if (customerErr) throw customerErr;
+
+      // If customer doesn't exist, we can still try to delete inbound_events
+      if (!customer) {
+        const { error: err } = await supabase
+          .from("inbound_events")
+          .delete()
+          .eq("instagram_user_id", igId);
+        if (err) throw err;
+        return;
+      }
+
+      const customerId = customer.id;
+
+      // 2. Fetch booking requests to delete associated appointments & timelines
+      const { data: bookings, error: bookingsErr } = await supabase
+        .from("booking_requests")
+        .select("id")
+        .eq("customer_id", customerId);
+      if (bookingsErr) throw bookingsErr;
+      const bookingIds = bookings?.map((b) => b.id) || [];
+
+      // 3. Fetch conversations to delete associated messages, batches, summaries, etc.
+      const { data: convs, error: convsErr } = await supabase
+        .from("conversations")
+        .select("id")
+        .eq("customer_id", customerId);
+      if (convsErr) throw convsErr;
+      const convIds = convs?.map((c) => c.id) || [];
+
+      // 4. Delete booking sub-records
+      if (bookingIds.length > 0) {
+        const { error: err1 } = await supabase
+          .from("appointments")
+          .delete()
+          .in("booking_request_id", bookingIds);
+        if (err1) throw err1;
+
+        const { error: err2 } = await supabase
+          .from("booking_timeline")
+          .delete()
+          .in("booking_request_id", bookingIds);
+        if (err2) throw err2;
+      }
+
+      // 5. Delete conversation sub-records
+      if (convIds.length > 0) {
+        const { error: err3 } = await supabase
+          .from("outbound_messages")
+          .delete()
+          .in("conversation_id", convIds);
+        if (err3) throw err3;
+
+        const { error: err4 } = await supabase
+          .from("ai_interactions")
+          .delete()
+          .in("conversation_id", convIds);
+        if (err4) throw err4;
+
+        const { error: err5 } = await supabase
+          .from("conversation_summaries")
+          .delete()
+          .in("conversation_id", convIds);
+        if (err5) throw err5;
+
+        const { error: err6 } = await supabase
+          .from("messages")
+          .delete()
+          .in("conversation_id", convIds);
+        if (err6) throw err6;
+
+        const { error: err7 } = await supabase
+          .from("conversation_batches")
+          .delete()
+          .in("conversation_id", convIds);
+        if (err7) throw err7;
+      }
+
+      // 6. Delete conversations and booking requests
+      const { error: err8 } = await supabase
+        .from("booking_requests")
+        .delete()
+        .eq("customer_id", customerId);
+      if (err8) throw err8;
+
+      const { error: err9 } = await supabase
+        .from("conversations")
+        .delete()
+        .eq("customer_id", customerId);
+      if (err9) throw err9;
+
+      // 7. Delete inbound events for this instagram user id
+      const { error: err10 } = await supabase
+        .from("inbound_events")
+        .delete()
+        .eq("instagram_user_id", igId);
+      if (err10) throw err10;
+
+      // 8. Finally delete the customer record
+      const { error: err11 } = await supabase
+        .from("customers")
+        .delete()
+        .eq("id", customerId);
+      if (err11) throw err11;
+    },
+    onSuccess: () => {
+      toast.success("Test account data reset successfully!");
+      setResetTarget(null);
+      invalidate();
+    },
+    onError: (e: Error) => toast.error("Failed to reset test account: " + e.message),
+  });
+
   return (
     <AppShell
       title="Test Accounts"
@@ -183,9 +308,25 @@ function TestAccountsPage() {
                     </TableCell>
                     <TableCell className="text-right">
                       {role === "admin" && (
-                        <Button variant="ghost" size="icon" onClick={() => setDeleteTarget(acc)}>
-                          <Trash2 className="h-4 w-4 text-destructive" />
-                        </Button>
+                        <div className="flex justify-end gap-2">
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            title="Reset test account data"
+                            onClick={() => setResetTarget(acc)}
+                            disabled={resetAccount.isPending}
+                          >
+                            <RotateCcw className="h-4 w-4 text-amber-500 hover:text-amber-600" />
+                          </Button>
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            title="Remove test account"
+                            onClick={() => setDeleteTarget(acc)}
+                          >
+                            <Trash2 className="h-4 w-4 text-destructive" />
+                          </Button>
+                        </div>
                       )}
                     </TableCell>
                   </TableRow>
@@ -251,6 +392,27 @@ function TestAccountsPage() {
               className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
             >
               Remove
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      <AlertDialog open={Boolean(resetTarget)} onOpenChange={(o) => !o && setResetTarget(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Reset test account data?</AlertDialogTitle>
+            <AlertDialogDescription>
+              This will permanently delete all messages, conversations, booking requests, appointments, and custom limits/history associated with Instagram ID {resetTarget?.instagram_user_id}. The test account configuration itself will not be removed.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={() => resetTarget && resetAccount.mutate(resetTarget)}
+              className="bg-amber-600 text-white hover:bg-amber-700"
+              disabled={resetAccount.isPending}
+            >
+              {resetAccount.isPending ? "Resetting..." : "Reset Data"}
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>

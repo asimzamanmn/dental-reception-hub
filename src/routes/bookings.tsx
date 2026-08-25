@@ -48,6 +48,11 @@ async function triggerN8nWebhook(payload: {
   endTime: string;
   notes?: string;
 }) {
+  if (!payload.customerEmail?.trim()) {
+    console.log("No customer email provided. Skipping email confirmation webhook trigger.");
+    return;
+  }
+
   const url = localStorage.getItem("n8n_email_webhook_url") || import.meta.env.VITE_N8N_EMAIL_WEBHOOK_URL;
   if (!url) {
     console.warn("No n8n webhook URL configured. Skipping email confirmation trigger.");
