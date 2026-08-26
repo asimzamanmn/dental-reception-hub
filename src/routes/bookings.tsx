@@ -439,8 +439,9 @@ function BookingsPage() {
       title="Bookings"
       description="Review patient requests and finalize schedules"
       actions={
-        <Button onClick={() => setIsManualBookingOpen(true)} className="font-semibold">
-          <Plus className="mr-2 h-4 w-4" /> Add Manual Booking
+        <Button onClick={() => setIsManualBookingOpen(true)} className="font-semibold px-2.5 sm:px-4">
+          <Plus className="h-4 w-4 sm:mr-2" />
+          <span className="hidden sm:inline">Add Manual Booking</span>
         </Button>
       }
     >
@@ -457,7 +458,7 @@ function BookingsPage() {
         </div>
 
         {/* Filter Tabs */}
-        <div className="flex flex-wrap gap-1 bg-secondary/40 border border-border p-1 rounded-lg self-start">
+        <div className="flex overflow-x-auto max-w-full scrollbar-none gap-1 bg-secondary/40 border border-border p-1 rounded-lg self-start w-full sm:w-auto">
           {[
             { id: "ALL", label: "All Bookings" },
             { id: "PENDING", label: "Pending Review" },
@@ -469,7 +470,7 @@ function BookingsPage() {
               variant={statusFilter === tab.id ? "secondary" : "ghost"}
               size="sm"
               onClick={() => setStatusFilter(tab.id)}
-              className={`text-xs rounded-md ${
+              className={`text-xs rounded-md whitespace-nowrap flex-1 sm:flex-none ${
                 statusFilter === tab.id ? "bg-background shadow-sm border border-border/40 font-semibold" : ""
               }`}
             >
@@ -815,7 +816,7 @@ function BookingsPage() {
               />
             </div>
 
-            <div className="grid grid-cols-2 gap-2">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <div className="grid gap-1.5">
                 <Label htmlFor="mb-phone" className="text-xs">Phone Number</Label>
                 <Input

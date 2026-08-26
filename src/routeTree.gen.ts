@@ -13,6 +13,7 @@ import { Route as IndexRouteImport } from './routes/index'
 import { Route as AnalyticsRouteImport } from './routes/analytics'
 import { Route as BookingsRouteImport } from './routes/bookings'
 import { Route as DoctorsRouteImport } from './routes/doctors'
+import { Route as InstagramCommentsRouteImport } from './routes/instagram-comments'
 import { Route as KnowledgeRouteImport } from './routes/knowledge'
 import { Route as LoginRouteImport } from './routes/login'
 import { Route as SendEmailRouteImport } from './routes/send-email'
@@ -38,6 +39,11 @@ const BookingsRoute = BookingsRouteImport.update({
 const DoctorsRoute = DoctorsRouteImport.update({
   id: '/doctors',
   path: '/doctors',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const InstagramCommentsRoute = InstagramCommentsRouteImport.update({
+  id: '/instagram-comments',
+  path: '/instagram-comments',
   getParentRoute: () => rootRouteImport,
 } as any)
 const KnowledgeRoute = KnowledgeRouteImport.update({
@@ -76,6 +82,7 @@ export interface FileRoutesByFullPath {
   '/analytics': typeof AnalyticsRoute
   '/bookings': typeof BookingsRoute
   '/doctors': typeof DoctorsRoute
+  '/instagram-comments': typeof InstagramCommentsRoute
   '/knowledge': typeof KnowledgeRoute
   '/login': typeof LoginRoute
   '/send-email': typeof SendEmailRoute
@@ -88,6 +95,7 @@ export interface FileRoutesByTo {
   '/analytics': typeof AnalyticsRoute
   '/bookings': typeof BookingsRoute
   '/doctors': typeof DoctorsRoute
+  '/instagram-comments': typeof InstagramCommentsRoute
   '/knowledge': typeof KnowledgeRoute
   '/login': typeof LoginRoute
   '/send-email': typeof SendEmailRoute
@@ -101,6 +109,7 @@ export interface FileRoutesById {
   '/analytics': typeof AnalyticsRoute
   '/bookings': typeof BookingsRoute
   '/doctors': typeof DoctorsRoute
+  '/instagram-comments': typeof InstagramCommentsRoute
   '/knowledge': typeof KnowledgeRoute
   '/login': typeof LoginRoute
   '/send-email': typeof SendEmailRoute
@@ -115,6 +124,7 @@ export interface FileRouteTypes {
     | '/analytics'
     | '/bookings'
     | '/doctors'
+    | '/instagram-comments'
     | '/knowledge'
     | '/login'
     | '/send-email'
@@ -127,6 +137,7 @@ export interface FileRouteTypes {
     | '/analytics'
     | '/bookings'
     | '/doctors'
+    | '/instagram-comments'
     | '/knowledge'
     | '/login'
     | '/send-email'
@@ -139,6 +150,7 @@ export interface FileRouteTypes {
     | '/analytics'
     | '/bookings'
     | '/doctors'
+    | '/instagram-comments'
     | '/knowledge'
     | '/login'
     | '/send-email'
@@ -152,6 +164,7 @@ export interface RootRouteChildren {
   AnalyticsRoute: typeof AnalyticsRoute
   BookingsRoute: typeof BookingsRoute
   DoctorsRoute: typeof DoctorsRoute
+  InstagramCommentsRoute: typeof InstagramCommentsRoute
   KnowledgeRoute: typeof KnowledgeRoute
   LoginRoute: typeof LoginRoute
   SendEmailRoute: typeof SendEmailRoute
@@ -188,6 +201,13 @@ declare module '@tanstack/react-router' {
       path: '/doctors'
       fullPath: '/doctors'
       preLoaderRoute: typeof DoctorsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/instagram-comments': {
+      id: '/instagram-comments'
+      path: '/instagram-comments'
+      fullPath: '/instagram-comments'
+      preLoaderRoute: typeof InstagramCommentsRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/knowledge': {
@@ -240,6 +260,7 @@ const rootRouteChildren: RootRouteChildren = {
   AnalyticsRoute: AnalyticsRoute,
   BookingsRoute: BookingsRoute,
   DoctorsRoute: DoctorsRoute,
+  InstagramCommentsRoute: InstagramCommentsRoute,
   KnowledgeRoute: KnowledgeRoute,
   LoginRoute: LoginRoute,
   SendEmailRoute: SendEmailRoute,

@@ -67,6 +67,18 @@ type Draft = {
   active: boolean;
 };
 
+const CATEGORIES = [
+  "AI_POLICY",
+  "BOOKING",
+  "EMERGENCY",
+  "FAQ",
+  "GENERAL",
+  "PAYMENT",
+  "POLICY",
+  "PRICING",
+  "TREATMENT",
+] as const;
+
 const EMPTY: Draft = {
   title: "",
   category: "",
@@ -313,12 +325,21 @@ function KnowledgePage() {
             <div className="grid gap-4 sm:grid-cols-2">
               <div className="grid gap-1.5">
                 <Label htmlFor="kb-cat">Category</Label>
-                <Input
-                  id="kb-cat"
+                <Select
                   value={draft.category}
-                  onChange={(e) => set("category", e.target.value)}
-                  placeholder="pricing, hours, treatments…"
-                />
+                  onValueChange={(v) => set("category", v)}
+                >
+                  <SelectTrigger id="kb-cat">
+                    <SelectValue placeholder="Select category" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {CATEGORIES.map((cat) => (
+                      <SelectItem key={cat} value={cat}>
+                        {cat}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
               </div>
               <div className="grid gap-1.5">
                 <Label htmlFor="kb-prio">Priority</Label>

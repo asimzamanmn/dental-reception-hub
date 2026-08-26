@@ -13,6 +13,7 @@ import {
   Menu,
   X,
   Mail,
+  MessageSquare,
 } from "lucide-react";
 import { useState, type ReactNode, useEffect } from "react";
 import { ThemeToggle } from "@/components/theme-toggle";
@@ -24,6 +25,7 @@ const NAV = [
   { to: "/", label: "Dashboard", icon: LayoutDashboard },
   { to: "/bookings", label: "Bookings", icon: CalendarCheck },
   { to: "/send-email", label: "Send Email", icon: Mail },
+  { to: "/instagram-comments", label: "Comment Automation", icon: MessageSquare },
   { to: "/analytics", label: "Analytics", icon: Activity },
   { to: "/services", label: "Services", icon: Sparkles },
   { to: "/knowledge", label: "Knowledge Base", icon: BookOpen },
@@ -63,7 +65,7 @@ export function AppShell({
 
   const visibleNav = NAV.filter(({ to }) => {
     if (role === "staff") {
-      const allowed = ["/", "/bookings", "/send-email"];
+      const allowed = ["/", "/bookings", "/send-email", "/instagram-comments"];
       return allowed.includes(to);
     }
     return true;

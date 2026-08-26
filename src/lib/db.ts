@@ -68,6 +68,29 @@ export type AuthorizedEmail = {
   created_at: string;
 };
 
+export type InstagramCommentCampaign = {
+  id: number;
+  post_id: string;
+  active: boolean;
+  created_at: string;
+};
+
+export type InstagramCommentKeyword = {
+  id: number;
+  campaign_id: number;
+  keyword: string;
+  dm_message: string;
+  active: boolean;
+  created_at: string;
+};
+
+export type InstagramProcessedComment = {
+  id: number;
+  comment_id: string;
+  campaign_id: number;
+  processed_at: string;
+};
+
 export type RecentConversation = {
   id: string;
   status: string | null;
