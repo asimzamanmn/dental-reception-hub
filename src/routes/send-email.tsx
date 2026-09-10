@@ -7,6 +7,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
+import { formatIndianPhone } from "@/lib/utils";
 
 export const Route = createFileRoute("/send-email")({
   head: () => ({
@@ -50,7 +51,7 @@ function SendEmailPage() {
         bookingId: "manual_send_" + Date.now(),
         customerName: patientName.trim(),
         customerEmail: email.trim(),
-        customerPhone: phone.trim() || undefined,
+        customerPhone: formatIndianPhone(phone.trim()) || undefined,
         serviceName: serviceName.trim() || "Dental Checkup",
         appointmentDate: apptDate,
         startTime: apptTime,
@@ -132,7 +133,7 @@ function SendEmailPage() {
               <Label htmlFor="se-phone">Patient Phone (Optional)</Label>
               <Input
                 id="se-phone"
-                placeholder="+1 234 567 8900"
+                placeholder="+91 98765 43210"
                 value={phone}
                 onChange={(e) => setPhone(e.target.value)}
               />

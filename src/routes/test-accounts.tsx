@@ -217,7 +217,20 @@ function TestAccountsPage() {
           .delete()
           .in("conversation_id", convIds);
         if (err7) throw err7;
+
+        const { error: errMedia } = await supabase
+          .from("media_requests")
+          .delete()
+          .in("conversation_id", convIds);
+        if (errMedia) throw errMedia;
       }
+
+      // Delete any remaining media requests for this customer
+      const { error: errCustMedia } = await supabase
+        .from("media_requests")
+        .delete()
+        .eq("customer_id", customerId);
+      if (errCustMedia) throw errCustMedia;
 
       // 6. Delete conversations and booking requests
       const { error: err8 } = await supabase
@@ -250,8 +263,18 @@ function TestAccountsPage() {
       toast.success("Test account data reset successfully!");
       setResetTarget(null);
       invalidate();
+      void queryClient.invalidateQueries({ queryKey: ["media-requests"] });
     },
-    onError: (e: Error) => toast.error("Failed to reset test account: " + e.message),
+    onError: (e: Error) => {
+      if (e.message?.includes("media_requests_conversation_id_fkey")) {
+        toast.error(
+          "Reset blocked by media_requests table permissions. Run the SQL fix in Supabase to allow DELETE or add ON DELETE CASCADE.",
+          { duration: 8000 },
+        );
+      } else {
+        toast.error("Failed to reset test account: " + e.message);
+      }
+    },
   });
 
   return (
@@ -402,7 +425,7 @@ function TestAccountsPage() {
           <AlertDialogHeader>
             <AlertDialogTitle>Reset test account data?</AlertDialogTitle>
             <AlertDialogDescription>
-              This will permanently delete all messages, conversations, booking requests, appointments, and custom limits/history associated with Instagram ID {resetTarget?.instagram_user_id}. The test account configuration itself will not be removed.
+              This will permanently delete all messages, conversations, media requests, booking requests, appointments, and custom limits/history associated with Instagram ID {resetTarget?.instagram_user_id}. The test account configuration itself will not be removed.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>

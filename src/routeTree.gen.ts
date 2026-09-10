@@ -12,10 +12,12 @@ import { Route as rootRouteImport } from './routes/__root'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as AnalyticsRouteImport } from './routes/analytics'
 import { Route as BookingsRouteImport } from './routes/bookings'
+import { Route as CalendarRouteImport } from './routes/calendar'
 import { Route as DoctorsRouteImport } from './routes/doctors'
 import { Route as InstagramCommentsRouteImport } from './routes/instagram-comments'
 import { Route as KnowledgeRouteImport } from './routes/knowledge'
 import { Route as LoginRouteImport } from './routes/login'
+import { Route as MediaRequestsRouteImport } from './routes/media-requests'
 import { Route as SendEmailRouteImport } from './routes/send-email'
 import { Route as ServicesRouteImport } from './routes/services'
 import { Route as SettingsRouteImport } from './routes/settings'
@@ -36,6 +38,11 @@ const BookingsRoute = BookingsRouteImport.update({
   path: '/bookings',
   getParentRoute: () => rootRouteImport,
 } as any)
+const CalendarRoute = CalendarRouteImport.update({
+  id: '/calendar',
+  path: '/calendar',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const DoctorsRoute = DoctorsRouteImport.update({
   id: '/doctors',
   path: '/doctors',
@@ -54,6 +61,11 @@ const KnowledgeRoute = KnowledgeRouteImport.update({
 const LoginRoute = LoginRouteImport.update({
   id: '/login',
   path: '/login',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const MediaRequestsRoute = MediaRequestsRouteImport.update({
+  id: '/media-requests',
+  path: '/media-requests',
   getParentRoute: () => rootRouteImport,
 } as any)
 const SendEmailRoute = SendEmailRouteImport.update({
@@ -81,10 +93,12 @@ export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/analytics': typeof AnalyticsRoute
   '/bookings': typeof BookingsRoute
+  '/calendar': typeof CalendarRoute
   '/doctors': typeof DoctorsRoute
   '/instagram-comments': typeof InstagramCommentsRoute
   '/knowledge': typeof KnowledgeRoute
   '/login': typeof LoginRoute
+  '/media-requests': typeof MediaRequestsRoute
   '/send-email': typeof SendEmailRoute
   '/services': typeof ServicesRoute
   '/settings': typeof SettingsRoute
@@ -94,10 +108,12 @@ export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/analytics': typeof AnalyticsRoute
   '/bookings': typeof BookingsRoute
+  '/calendar': typeof CalendarRoute
   '/doctors': typeof DoctorsRoute
   '/instagram-comments': typeof InstagramCommentsRoute
   '/knowledge': typeof KnowledgeRoute
   '/login': typeof LoginRoute
+  '/media-requests': typeof MediaRequestsRoute
   '/send-email': typeof SendEmailRoute
   '/services': typeof ServicesRoute
   '/settings': typeof SettingsRoute
@@ -108,10 +124,12 @@ export interface FileRoutesById {
   '/': typeof IndexRoute
   '/analytics': typeof AnalyticsRoute
   '/bookings': typeof BookingsRoute
+  '/calendar': typeof CalendarRoute
   '/doctors': typeof DoctorsRoute
   '/instagram-comments': typeof InstagramCommentsRoute
   '/knowledge': typeof KnowledgeRoute
   '/login': typeof LoginRoute
+  '/media-requests': typeof MediaRequestsRoute
   '/send-email': typeof SendEmailRoute
   '/services': typeof ServicesRoute
   '/settings': typeof SettingsRoute
@@ -123,10 +141,12 @@ export interface FileRouteTypes {
     | '/'
     | '/analytics'
     | '/bookings'
+    | '/calendar'
     | '/doctors'
     | '/instagram-comments'
     | '/knowledge'
     | '/login'
+    | '/media-requests'
     | '/send-email'
     | '/services'
     | '/settings'
@@ -136,10 +156,12 @@ export interface FileRouteTypes {
     | '/'
     | '/analytics'
     | '/bookings'
+    | '/calendar'
     | '/doctors'
     | '/instagram-comments'
     | '/knowledge'
     | '/login'
+    | '/media-requests'
     | '/send-email'
     | '/services'
     | '/settings'
@@ -149,10 +171,12 @@ export interface FileRouteTypes {
     | '/'
     | '/analytics'
     | '/bookings'
+    | '/calendar'
     | '/doctors'
     | '/instagram-comments'
     | '/knowledge'
     | '/login'
+    | '/media-requests'
     | '/send-email'
     | '/services'
     | '/settings'
@@ -163,10 +187,12 @@ export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   AnalyticsRoute: typeof AnalyticsRoute
   BookingsRoute: typeof BookingsRoute
+  CalendarRoute: typeof CalendarRoute
   DoctorsRoute: typeof DoctorsRoute
   InstagramCommentsRoute: typeof InstagramCommentsRoute
   KnowledgeRoute: typeof KnowledgeRoute
   LoginRoute: typeof LoginRoute
+  MediaRequestsRoute: typeof MediaRequestsRoute
   SendEmailRoute: typeof SendEmailRoute
   ServicesRoute: typeof ServicesRoute
   SettingsRoute: typeof SettingsRoute
@@ -196,6 +222,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof BookingsRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/calendar': {
+      id: '/calendar'
+      path: '/calendar'
+      fullPath: '/calendar'
+      preLoaderRoute: typeof CalendarRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/doctors': {
       id: '/doctors'
       path: '/doctors'
@@ -222,6 +255,13 @@ declare module '@tanstack/react-router' {
       path: '/login'
       fullPath: '/login'
       preLoaderRoute: typeof LoginRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/media-requests': {
+      id: '/media-requests'
+      path: '/media-requests'
+      fullPath: '/media-requests'
+      preLoaderRoute: typeof MediaRequestsRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/send-email': {
@@ -259,10 +299,12 @@ const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   AnalyticsRoute: AnalyticsRoute,
   BookingsRoute: BookingsRoute,
+  CalendarRoute: CalendarRoute,
   DoctorsRoute: DoctorsRoute,
   InstagramCommentsRoute: InstagramCommentsRoute,
   KnowledgeRoute: KnowledgeRoute,
   LoginRoute: LoginRoute,
+  MediaRequestsRoute: MediaRequestsRoute,
   SendEmailRoute: SendEmailRoute,
   ServicesRoute: ServicesRoute,
   SettingsRoute: SettingsRoute,

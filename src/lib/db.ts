@@ -113,6 +113,22 @@ export type RecentBooking = {
   services: { name: string } | null;
 };
 
+export type MediaRequest = {
+  id: string;
+  conversation_id: string;
+  customer_id: string;
+  message_id: string;
+  media_type: "image" | "voice" | "audio" | "video" | string;
+  media_url: string;
+  patient_note: string | null;
+  customer_name: string | null;
+  customer_phone: string | null;
+  contact_attempts: number;
+  status: "pending" | "resolved" | "contacted" | string;
+  created_at: string;
+  resolved_at: string | null;
+};
+
 export const WEEKDAYS = [
   "Sunday",
   "Monday",

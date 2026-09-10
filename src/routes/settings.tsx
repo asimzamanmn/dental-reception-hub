@@ -18,7 +18,7 @@ import {
 import { supabase } from "@/integrations/supabase/client";
 import { BOOKING_PROVIDERS, formatDateTime, type Settings, type AuthorizedEmail } from "@/lib/db";
 import { useAuth } from "@/hooks/use-auth";
-import { Plus, Trash2, ShieldAlert, UserCheck } from "lucide-react";
+import { Plus, ShieldAlert, UserCheck } from "lucide-react";
 import {
   Table,
   TableBody,
@@ -110,20 +110,6 @@ function SettingsPage() {
     onError: (e: Error) => toast.error(e.message),
   });
 
-  const removeEmail = useMutation({
-    mutationFn: async (email: string) => {
-      const { error } = await supabase
-        .from("authorized_emails")
-        .delete()
-        .eq("email", email);
-      if (error) throw error;
-    },
-    onSuccess: () => {
-      toast.success("Authorized email removed.");
-      void queryClient.invalidateQueries({ queryKey: ["authorized-emails"] });
-    },
-    onError: (e: Error) => toast.error(e.message),
-  });
 
   const settings = useQuery({
     queryKey: ["settings"],
@@ -403,13 +389,12 @@ function SettingsPage() {
                       <TableHead>Authorized Email</TableHead>
                       <TableHead>Role</TableHead>
                       <TableHead>Authorized Date</TableHead>
-                      <TableHead className="text-right">Actions</TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
                     {authorizedEmails.isLoading ? (
                       <TableRow>
-                        <TableCell colSpan={4}>
+                        <TableCell colSpan={3}>
                           <Skeleton className="h-6 w-full" />
                         </TableCell>
                       </TableRow>
@@ -438,21 +423,11 @@ function SettingsPage() {
                         <TableCell className="text-muted-foreground text-xs">
                           {formatDateTime(acc.created_at)}
                         </TableCell>
-                        <TableCell className="text-right">
-                          <Button
-                            variant="ghost"
-                            size="icon"
-                            disabled={removeEmail.isPending}
-                            onClick={() => removeEmail.mutate(acc.email)}
-                          >
-                            <Trash2 className="h-4 w-4 text-destructive" />
-                          </Button>
-                        </TableCell>
                       </TableRow>
                     ))}
                     {!authorizedEmails.isLoading && !(authorizedEmails.data ?? []).length && (
                       <TableRow>
-                        <TableCell colSpan={4} className="py-8 text-center text-sm text-muted-foreground">
+                        <TableCell colSpan={3} className="py-8 text-center text-sm text-muted-foreground">
                           No authorized emails registered. Add one above.
                         </TableCell>
                       </TableRow>

@@ -49,6 +49,7 @@ import {
   type RecentBooking,
   type RecentConversation,
 } from "@/lib/db";
+import { formatIndianPhone } from "@/lib/utils";
 
 async function triggerN8nWebhook(payload: {
   bookingId: string;
@@ -652,7 +653,7 @@ function DashboardPage() {
                 </div>
                 <div className="col-span-2">
                   <span className="block text-muted-foreground">Patient Phone Number:</span>
-                  <span className="font-medium text-primary">{selectedBooking.customers?.phone ?? "—"}</span>
+                  <span className="font-medium text-primary font-mono">{formatIndianPhone(selectedBooking.customers?.phone) || "—"}</span>
                 </div>
               </div>
 

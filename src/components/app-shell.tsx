@@ -10,10 +10,12 @@ import {
   LogOut,
   User as UserIcon,
   CalendarCheck,
+  CalendarDays,
   Menu,
   X,
   Mail,
   MessageSquare,
+  Film,
 } from "lucide-react";
 import { useState, type ReactNode, useEffect } from "react";
 import { ThemeToggle } from "@/components/theme-toggle";
@@ -24,6 +26,8 @@ import { Button } from "@/components/ui/button";
 const NAV = [
   { to: "/", label: "Dashboard", icon: LayoutDashboard },
   { to: "/bookings", label: "Bookings", icon: CalendarCheck },
+  { to: "/calendar", label: "Booking Calendar", icon: CalendarDays },
+  { to: "/media-requests", label: "Media Requests", icon: Film },
   { to: "/send-email", label: "Send Email", icon: Mail },
   { to: "/instagram-comments", label: "Comment Automation", icon: MessageSquare },
   { to: "/analytics", label: "Analytics", icon: Activity },
@@ -65,7 +69,7 @@ export function AppShell({
 
   const visibleNav = NAV.filter(({ to }) => {
     if (role === "staff") {
-      const allowed = ["/", "/bookings", "/send-email", "/instagram-comments"];
+      const allowed = ["/", "/bookings", "/calendar", "/media-requests", "/send-email", "/instagram-comments"];
       return allowed.includes(to);
     }
     return true;

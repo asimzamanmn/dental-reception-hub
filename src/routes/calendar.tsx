@@ -3,7 +3,9 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState, useMemo } from "react";
 import {
   CalendarCheck,
+  Clock,
   Search,
+  AlertTriangle,
   Sparkles,
   Calendar as CalendarIcon,
   Plus,
@@ -12,6 +14,7 @@ import {
   MessageCircle,
   CheckCircle2,
   CalendarClock,
+  ListFilter,
 } from "lucide-react";
 import { toast } from "sonner";
 import { AppShell } from "@/components/app-shell";
@@ -21,6 +24,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Skeleton } from "@/components/ui/skeleton";
+import { Calendar as CalendarPicker } from "@/components/ui/calendar";
 import {
   Select,
   SelectContent,
@@ -36,17 +40,36 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/hooks/use-auth";
 import { formatIndianPhone, getTelLink, getWhatsAppLink } from "@/lib/utils";
+
+function toDateKey(val: Date | string | null | undefined): string {
+  if (!val) return "";
+  if (val instanceof Date) {
+    const y = val.getFullYear();
+    const m = String(val.getMonth() + 1).padStart(2, "0");
+    const d = String(val.getDate()).padStart(2, "0");
+    return `${y}-${m}-${d}`;
+  }
+  if (typeof val === "string") {
+    if (/^\d{4}-\d{2}-\d{2}/.test(val)) {
+      return val.slice(0, 10);
+    }
+    const d = new Date(val);
+    if (isNaN(d.getTime())) return "";
+    const y = d.getFullYear();
+    const m = String(d.getMonth() + 1).padStart(2, "0");
+    const day = String(d.getDate()).padStart(2, "0");
+    return `${y}-${m}-${day}`;
+  }
+  return "";
+}
+
+function parseLocalDate(key: string): Date {
+  const [y, m, d] = key.split("-").map(Number);
+  return new Date(y, m - 1, d);
+}
 
 async function triggerN8nWebhook(payload: {
   bookingId: string;
@@ -87,22 +110,26 @@ async function triggerN8nWebhook(payload: {
   }
 }
 
-export const Route = createFileRoute("/bookings")({
+export const Route = createFileRoute("/calendar")({
   head: () => ({
     meta: [
-      { title: "Bookings — Dental AI Receptionist Console" },
+      { title: "Booking Calendar — Dental AI Receptionist Console" },
       {
         name: "description",
-        content: "Search, filter and process patient booking requests and appointments.",
+        content: "Track processed appointments, view clinic schedules by day and month on an interactive calendar.",
       },
     ],
   }),
-  component: BookingsPage,
+  component: CalendarPage,
 });
 
-function BookingsPage() {
+function CalendarPage() {
   const { role } = useAuth();
   const queryClient = useQueryClient();
+
+  // Calendar selection state
+  const [selectedDate, setSelectedDate] = useState<Date>(new Date());
+  const [isRescheduleMode, setIsRescheduleMode] = useState<boolean>(false);
 
   // Filtering and Searching States
   const [statusFilter, setStatusFilter] = useState<string>("ALL");
@@ -115,7 +142,6 @@ function BookingsPage() {
   const [endTime, setEndTime] = useState<string>("09:30");
   const [notes, setNotes] = useState<string>("");
   const [isDeclineMode, setIsDeclineMode] = useState<boolean>(false);
-  const [isRescheduleMode, setIsRescheduleMode] = useState<boolean>(false);
 
   // Manual Booking States
   const [isManualBookingOpen, setIsManualBookingOpen] = useState(false);
@@ -181,6 +207,7 @@ function BookingsPage() {
         .eq("id", bookingId);
       if (updateError) throw updateError;
 
+      // Check if appointment already exists (rescheduling)
       const { data: existingAppt } = await supabase
         .from("appointments")
         .select("id")
@@ -442,6 +469,7 @@ function BookingsPage() {
     }
   };
 
+  // Filtered bookings according to search & status
   const filteredBookings = useMemo(() => {
     return (bookingsQuery.data || []).filter((b) => {
       const matchesStatus =
@@ -464,19 +492,116 @@ function BookingsPage() {
     });
   }, [bookingsQuery.data, statusFilter, searchQuery]);
 
+  const selectedDateKey = useMemo(() => toDateKey(selectedDate), [selectedDate]);
+  const todayKey = useMemo(() => toDateKey(new Date()), []);
+
+  // Bookings that match the selected date on the calendar
+  const selectedDayBookings = useMemo(() => {
+    if (!selectedDateKey) return [];
+    return filteredBookings.filter((b) => {
+      if (b.status === "CONFIRMED") {
+        const dateStr = b.appointments?.[0]?.appointment_date || b.preferred_date;
+        return toDateKey(dateStr) === selectedDateKey;
+      }
+      if (b.status === "PENDING_STAFF" && b.preferred_date) {
+        return toDateKey(b.preferred_date) === selectedDateKey;
+      }
+      if (b.status === "DECLINED" && b.preferred_date) {
+        return toDateKey(b.preferred_date) === selectedDateKey;
+      }
+      return false;
+    }).sort((a, b) => {
+      const timeA = a.appointments?.[0]?.start_time || a.preferred_time_text || "99:99";
+      const timeB = b.appointments?.[0]?.start_time || b.preferred_time_text || "99:99";
+      return timeA.localeCompare(timeB);
+    });
+  }, [filteredBookings, selectedDateKey]);
+
+  // Dates with confirmed and pending bookings for calendar modifiers
+  const confirmedDates = useMemo(() => {
+    const set = new Set<string>();
+    (bookingsQuery.data || []).forEach((b) => {
+      if (b.status === "CONFIRMED") {
+        const dateStr = b.appointments?.[0]?.appointment_date || b.preferred_date;
+        const key = toDateKey(dateStr);
+        if (key) set.add(key);
+      }
+    });
+    return Array.from(set).map(parseLocalDate);
+  }, [bookingsQuery.data]);
+
+  const pendingDates = useMemo(() => {
+    const set = new Set<string>();
+    (bookingsQuery.data || []).forEach((b) => {
+      if (b.status === "PENDING_STAFF" && b.preferred_date) {
+        const key = toDateKey(b.preferred_date);
+        if (key) set.add(key);
+      }
+    });
+    return Array.from(set).map(parseLocalDate);
+  }, [bookingsQuery.data]);
+
+  // Operational metrics
+  const stats = useMemo(() => {
+    const all = bookingsQuery.data || [];
+    let todayCount = 0;
+    let upcomingCount = 0;
+    let thisMonthCount = 0;
+    let pendingCount = 0;
+
+    const now = new Date();
+    const currentYear = now.getFullYear();
+    const currentMonth = now.getMonth();
+
+    all.forEach((b) => {
+      if (b.status === "PENDING_STAFF") {
+        pendingCount++;
+      }
+      if (b.status === "CONFIRMED") {
+        const dateStr = b.appointments?.[0]?.appointment_date || b.preferred_date;
+        const key = toDateKey(dateStr);
+        if (key) {
+          if (key === todayKey) {
+            todayCount++;
+          }
+          if (key >= todayKey) {
+            upcomingCount++;
+          }
+          const [y, m] = key.split("-").map(Number);
+          if (y === currentYear && m === currentMonth + 1) {
+            thisMonthCount++;
+          }
+        }
+      }
+    });
+
+    return { todayCount, upcomingCount, thisMonthCount, pendingCount };
+  }, [bookingsQuery.data, todayKey]);
+
+  const confirmedOnDay = useMemo(() => {
+    return selectedDayBookings.filter((b) => b.status === "CONFIRMED");
+  }, [selectedDayBookings]);
+
+  const pendingOnDay = useMemo(() => {
+    return selectedDayBookings.filter((b) => b.status === "PENDING_STAFF");
+  }, [selectedDayBookings]);
+
   return (
     <AppShell
-      title="Bookings"
-      description="Review patient requests, process pending approvals, and schedule appointments"
+      title="Booking Calendar"
+      description="Track processed appointments, view schedules by day/month, and manage clinic bookings"
       actions={
         <div className="flex items-center gap-2">
-          <Button asChild variant="outline" size="sm" className="text-xs font-semibold">
-            <Link to="/calendar">
-              <CalendarDays className="h-3.5 w-3.5 mr-1.5 text-primary" /> Booking Calendar
+          <Button asChild variant="outline" size="sm" className="hidden sm:inline-flex text-xs font-semibold">
+            <Link to="/bookings">
+              <ListFilter className="h-3.5 w-3.5 mr-1.5" /> Bookings List
             </Link>
           </Button>
           <Button
-            onClick={() => setIsManualBookingOpen(true)}
+            onClick={() => {
+              setManualDate(selectedDateKey || todayKey);
+              setIsManualBookingOpen(true);
+            }}
             className="font-semibold px-2.5 sm:px-4 text-xs"
           >
             <Plus className="h-4 w-4 sm:mr-1.5" />
@@ -487,7 +612,7 @@ function BookingsPage() {
       }
     >
       {/* Top Filter and Search Toolbar */}
-      <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         {/* Search Bar */}
         <div className="relative w-full max-w-sm">
           <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
@@ -499,263 +624,343 @@ function BookingsPage() {
           />
         </div>
 
-        {/* Filter Tabs */}
-        <div className="flex overflow-x-auto max-w-full scrollbar-none gap-1 bg-secondary/40 border border-border p-1 rounded-lg self-start w-full sm:w-auto">
-          {[
-            { id: "ALL", label: "All Bookings" },
-            { id: "PENDING", label: "Pending Review" },
-            { id: "CONFIRMED", label: "Confirmed" },
-            { id: "DECLINED", label: "Declined" },
-          ].map((tab) => (
-            <Button
-              key={tab.id}
-              variant={statusFilter === tab.id ? "secondary" : "ghost"}
-              size="sm"
-              onClick={() => setStatusFilter(tab.id)}
-              className={`text-xs rounded-md whitespace-nowrap flex-1 sm:flex-none px-3 ${
-                statusFilter === tab.id ? "bg-background shadow-xs border border-border/40 font-semibold text-foreground" : ""
-              }`}
-            >
-              {tab.label}
-            </Button>
-          ))}
+        {/* Filter Tabs & Link to Bookings List */}
+        <div className="flex items-center gap-2">
+          <div className="flex overflow-x-auto max-w-full scrollbar-none gap-1 bg-secondary/40 border border-border p-1 rounded-lg">
+            {[
+              { id: "ALL", label: "All" },
+              { id: "CONFIRMED", label: "Confirmed" },
+              { id: "PENDING", label: "Pending" },
+            ].map((tab) => (
+              <Button
+                key={tab.id}
+                variant={statusFilter === tab.id ? "secondary" : "ghost"}
+                size="sm"
+                onClick={() => setStatusFilter(tab.id)}
+                className={`h-8 text-xs rounded-md whitespace-nowrap px-3 ${
+                  statusFilter === tab.id ? "bg-background shadow-xs border border-border/40 font-semibold text-foreground" : ""
+                }`}
+              >
+                {tab.label}
+              </Button>
+            ))}
+          </div>
+
+          <Button asChild variant="ghost" size="sm" className="sm:hidden h-8 text-xs px-2">
+            <Link to="/bookings">
+              <ListFilter className="h-3.5 w-3.5" />
+            </Link>
+          </Button>
         </div>
       </div>
 
-      {/* Bookings List/Table */}
+      {/* Quick Metrics Bar */}
+      <div className="mt-6 grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
+        <div className="surface p-4 border border-border rounded-xl flex items-center justify-between">
+          <div>
+            <p className="text-xs text-muted-foreground font-medium">Today's Schedule</p>
+            <p className="text-2xl font-bold text-foreground mt-0.5">{stats.todayCount}</p>
+            <p className="text-[11px] text-emerald-600 dark:text-emerald-400 mt-0.5 font-medium">
+              Confirmed appointments
+            </p>
+          </div>
+          <div className="h-10 w-10 rounded-lg bg-emerald-500/10 text-emerald-500 flex items-center justify-center">
+            <CalendarCheck className="h-5 w-5" />
+          </div>
+        </div>
+
+        <div className="surface p-4 border border-border rounded-xl flex items-center justify-between">
+          <div>
+            <p className="text-xs text-muted-foreground font-medium">Upcoming (From Today)</p>
+            <p className="text-2xl font-bold text-foreground mt-0.5">{stats.upcomingCount}</p>
+            <p className="text-[11px] text-blue-600 dark:text-blue-400 mt-0.5 font-medium">
+              Scheduled ahead
+            </p>
+          </div>
+          <div className="h-10 w-10 rounded-lg bg-blue-500/10 text-blue-500 flex items-center justify-center">
+            <Clock className="h-5 w-5" />
+          </div>
+        </div>
+
+        <div className="surface p-4 border border-border rounded-xl flex items-center justify-between">
+          <div>
+            <p className="text-xs text-muted-foreground font-medium">This Month Total</p>
+            <p className="text-2xl font-bold text-foreground mt-0.5">{stats.thisMonthCount}</p>
+            <p className="text-[11px] text-purple-600 dark:text-purple-400 mt-0.5 font-medium">
+              Processed bookings
+            </p>
+          </div>
+          <div className="h-10 w-10 rounded-lg bg-purple-500/10 text-purple-500 flex items-center justify-center">
+            <CalendarDays className="h-5 w-5" />
+          </div>
+        </div>
+
+        <Link
+          to="/bookings"
+          className="surface p-4 border border-border rounded-xl flex items-center justify-between hover:border-amber-500/40 transition-colors"
+          title="Click to review pending requests in Bookings page"
+        >
+          <div>
+            <p className="text-xs text-muted-foreground font-medium">Pending Review</p>
+            <p className="text-2xl font-bold text-amber-500 mt-0.5">{stats.pendingCount}</p>
+            <p className="text-[11px] text-muted-foreground mt-0.5 font-medium">
+              Manage in Bookings &rarr;
+            </p>
+          </div>
+          <div className="h-10 w-10 rounded-lg bg-amber-500/10 text-amber-500 flex items-center justify-center">
+            <AlertTriangle className="h-5 w-5" />
+          </div>
+        </Link>
+      </div>
+
+      {/* Main 2-Column Calendar & Daily Schedule Layout */}
       <div className="mt-6">
         {bookingsQuery.isLoading ? (
           <div className="grid gap-4">
-            {Array.from({ length: 4 }).map((_, i) => (
-              <Skeleton key={i} className="h-24 w-full rounded-xl" />
+            {Array.from({ length: 3 }).map((_, i) => (
+              <Skeleton key={i} className="h-28 w-full rounded-xl" />
             ))}
           </div>
-        ) : filteredBookings.length === 0 ? (
-          <div className="surface p-12 text-center">
-            <CalendarIcon className="mx-auto h-8 w-8 text-muted-foreground animate-bounce" />
-            <h3 className="mt-4 text-sm font-semibold">No bookings found</h3>
-            <p className="mt-1 text-xs text-muted-foreground">
-              Try adjusting your search criteria or status filter.
-            </p>
-          </div>
         ) : (
-          <>
-            {/* Desktop Table View */}
-            <div className="hidden lg:block surface overflow-x-auto">
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead>Patient Details</TableHead>
-                    <TableHead>Service</TableHead>
-                    <TableHead>Scheduled / Preferred Time</TableHead>
-                    <TableHead>Urgency</TableHead>
-                    <TableHead>Status</TableHead>
-                    <TableHead className="text-right">Actions</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {filteredBookings.map((b) => (
-                    <TableRow key={b.id}>
-                      <TableCell>
-                        <div className="flex flex-col">
-                          <span className="font-semibold text-sm">{b.customers?.display_name || "Guest User"}</span>
-                          <span className="text-xs text-muted-foreground font-mono">@{b.customers?.instagram_username}</span>
-                          {b.customers?.phone && (
-                            <div className="flex items-center gap-1.5 mt-0.5">
-                              <span className="text-xs text-muted-foreground font-mono">
-                                {formatIndianPhone(b.customers.phone)}
-                              </span>
-                              <a
-                                href={getTelLink(b.customers.phone)}
-                                title="Call Patient"
-                                className="text-blue-500 hover:text-blue-600 ml-1"
-                              >
-                                <Phone className="h-3 w-3" />
-                              </a>
-                              <a
-                                href={getWhatsAppLink(
-                                  b.customers.phone,
-                                  `Hello ${b.customers?.display_name || ""}, regarding your dental booking...`
-                                )}
-                                target="_blank"
-                                rel="noopener noreferrer"
-                                title="WhatsApp Patient"
-                                className="text-emerald-500 hover:text-emerald-600"
-                              >
-                                <MessageCircle className="h-3 w-3" />
-                              </a>
-                            </div>
-                          )}
-                          {b.email && <span className="text-xs text-muted-foreground font-mono mt-0.5">{b.email}</span>}
+          <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
+            {/* Left Column: Interactive Month Calendar Picker (5 cols) */}
+            <div className="lg:col-span-5 surface p-4 sm:p-5 border border-border rounded-xl flex flex-col gap-4">
+              <div className="flex items-center justify-between pb-3 border-b border-border/60">
+                <div>
+                  <h3 className="font-semibold text-sm text-foreground">Select Schedule Date</h3>
+                  <p className="text-xs text-muted-foreground">Pick a day to inspect booked appointments</p>
+                </div>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => setSelectedDate(new Date())}
+                  className="h-7 text-xs px-2.5"
+                >
+                  Today
+                </Button>
+              </div>
+
+              {/* DayPicker Calendar */}
+              <div className="flex justify-center w-full">
+                <CalendarPicker
+                  mode="single"
+                  selected={selectedDate}
+                  onSelect={(date) => date && setSelectedDate(date)}
+                  modifiers={{
+                    hasConfirmed: confirmedDates,
+                    hasPending: pendingDates,
+                  }}
+                  modifiersClassNames={{
+                    hasConfirmed:
+                      "relative after:content-[''] after:absolute after:bottom-1 after:left-1.5 after:w-1.5 after:h-1.5 after:bg-emerald-500 after:rounded-full font-semibold",
+                    hasPending:
+                      "relative before:content-[''] before:absolute before:bottom-1 before:right-1.5 before:w-1.5 before:h-1.5 before:bg-amber-500 before:rounded-full font-semibold",
+                  }}
+                  className="w-full rounded-lg"
+                />
+              </div>
+
+              {/* Calendar Dot Legend */}
+              <div className="pt-3 border-t border-border/60 flex flex-wrap items-center justify-between gap-3 text-xs text-muted-foreground">
+                <div className="flex items-center gap-1.5">
+                  <span className="w-2.5 h-2.5 rounded-full bg-emerald-500 inline-block" />
+                  <span>Confirmed Appointment</span>
+                </div>
+                <div className="flex items-center gap-1.5">
+                  <span className="w-2.5 h-2.5 rounded-full bg-amber-500 inline-block" />
+                  <span>Pending Review</span>
+                </div>
+              </div>
+            </div>
+
+            {/* Right Column: Day's Appointments Timeline (7 cols) */}
+            <div className="lg:col-span-7 surface p-4 sm:p-5 border border-border rounded-xl flex flex-col gap-4 min-h-[450px]">
+              {/* Header for the Selected Day */}
+              <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 pb-4 border-b border-border/60">
+                <div>
+                  <div className="flex items-center gap-2">
+                    <h3 className="text-base sm:text-lg font-bold text-foreground">
+                      {selectedDate.toLocaleDateString(undefined, {
+                        weekday: "long",
+                        month: "short",
+                        day: "numeric",
+                        year: "numeric",
+                      })}
+                    </h3>
+                    {selectedDateKey === todayKey && (
+                      <Badge variant="secondary" className="bg-primary/10 text-primary border-primary/20 text-xs font-semibold">
+                        Today
+                      </Badge>
+                    )}
+                  </div>
+                  <p className="text-xs text-muted-foreground mt-0.5">
+                    {confirmedOnDay.length} Confirmed {confirmedOnDay.length === 1 ? "Appointment" : "Appointments"}
+                    {pendingOnDay.length > 0 ? ` · ${pendingOnDay.length} Pending Review` : ""}
+                  </p>
+                </div>
+                <Button
+                  size="sm"
+                  onClick={() => {
+                    setManualDate(selectedDateKey);
+                    setIsManualBookingOpen(true);
+                  }}
+                  className="h-8 text-xs font-semibold self-start sm:self-auto"
+                >
+                  <Plus className="h-3.5 w-3.5 mr-1" /> Book for this Day
+                </Button>
+              </div>
+
+              {/* Selected Day Bookings List */}
+              {selectedDayBookings.length === 0 ? (
+                <div className="my-auto py-12 text-center flex flex-col items-center justify-center border border-dashed border-border/80 rounded-xl bg-card/40">
+                  <div className="h-12 w-12 rounded-full bg-primary/10 text-primary flex items-center justify-center mb-3">
+                    <CalendarCheck className="h-6 w-6" />
+                  </div>
+                  <h4 className="font-semibold text-sm text-foreground">No bookings for this date</h4>
+                  <p className="text-xs text-muted-foreground max-w-sm mt-1 px-4">
+                    {searchQuery || statusFilter !== "ALL"
+                      ? "No bookings match your current search or status filter on this date."
+                      : `The clinic schedule is clear for ${selectedDate.toLocaleDateString(undefined, {
+                          month: "short",
+                          day: "numeric",
+                        })}. You can manually schedule an appointment or select another day.`}
+                  </p>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    className="mt-4 text-xs font-semibold"
+                    onClick={() => {
+                      setManualDate(selectedDateKey);
+                      setIsManualBookingOpen(true);
+                    }}
+                  >
+                    <Plus className="h-3.5 w-3.5 mr-1.5" /> Schedule for this Day
+                  </Button>
+                </div>
+              ) : (
+                <div className="space-y-3">
+                  {selectedDayBookings.map((b) => (
+                    <div
+                      key={b.id}
+                      className={`p-4 rounded-xl border transition-all ${
+                        b.status === "CONFIRMED"
+                          ? "border-emerald-500/30 bg-card hover:border-emerald-500/60 shadow-xs"
+                          : b.status === "PENDING_STAFF"
+                          ? "border-amber-500/30 bg-card hover:border-amber-500/60 shadow-xs"
+                          : "border-border bg-card/60"
+                      }`}
+                    >
+                      {/* Header: Time Slot + Status Badges + Action Button */}
+                      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-secondary/80 border border-border/60 text-xs font-semibold text-foreground">
+                            <Clock className="h-3.5 w-3.5 text-primary" />
+                            <span>
+                              {b.appointments?.[0]
+                                ? `${b.appointments[0].start_time.slice(0, 5)} - ${b.appointments[0].end_time.slice(0, 5)}`
+                                : b.preferred_time_text || "Flexible Time"}
+                            </span>
+                          </div>
+                          {getStatusBadge(b.status)}
+                          {getUrgencyBadge(b.urgency)}
                         </div>
-                      </TableCell>
-                      <TableCell>
-                        <div className="flex flex-col">
-                          <span className="text-sm font-medium">{b.services?.name || "General Checkup"}</span>
-                          <span className="text-xs text-muted-foreground">{b.services?.duration_minutes || 30} mins duration</span>
-                        </div>
-                      </TableCell>
-                      <TableCell>
-                        <div className="flex flex-col text-sm">
-                          {b.status === "CONFIRMED" && b.appointments?.[0] ? (
-                            <>
-                              <span className="font-semibold text-emerald-600 dark:text-emerald-400">
-                                {new Date(b.appointments[0].appointment_date).toLocaleDateString(undefined, {
-                                  weekday: "short",
-                                  month: "short",
-                                  day: "numeric",
-                                })}
-                              </span>
-                              <span className="text-emerald-600 dark:text-emerald-400 text-xs font-medium">
-                                {b.appointments[0].start_time.slice(0, 5)} - {b.appointments[0].end_time.slice(0, 5)}
-                              </span>
-                            </>
-                          ) : (
-                            <>
-                              <span className="font-medium">
-                                {b.preferred_date
-                                  ? new Date(b.preferred_date).toLocaleDateString(undefined, {
-                                      weekday: "short",
-                                      month: "short",
-                                      day: "numeric",
-                                    })
-                                  : "—"}
-                              </span>
-                              <span className="text-muted-foreground text-xs">{b.preferred_time_text || "Flexible time"}</span>
-                            </>
-                          )}
-                        </div>
-                      </TableCell>
-                      <TableCell>{getUrgencyBadge(b.urgency)}</TableCell>
-                      <TableCell>{getStatusBadge(b.status)}</TableCell>
-                      <TableCell className="text-right">
+
                         <Button
                           variant={b.status === "PENDING_STAFF" ? "default" : "outline"}
                           size="sm"
+                          className="h-8 text-xs font-semibold self-start sm:self-auto"
                           onClick={() => handleOpenBooking(b)}
                         >
                           {b.status === "PENDING_STAFF" ? "Process Request" : "Manage / Details"}
                         </Button>
-                      </TableCell>
-                    </TableRow>
-                  ))}
-                </TableBody>
-              </Table>
-            </div>
-
-            {/* Mobile Card Grid View */}
-            <div className="grid gap-4 sm:grid-cols-2 lg:hidden">
-              {filteredBookings.map((b) => (
-                <div
-                  key={b.id}
-                  className="surface p-4 flex flex-col justify-between gap-4 border border-border bg-card shadow-sm hover:shadow-md transition-shadow"
-                >
-                  <div className="flex flex-col gap-2">
-                    <div className="flex items-start justify-between">
-                      <div className="flex flex-col">
-                        <span className="font-semibold text-sm">{b.customers?.display_name || "Guest User"}</span>
-                        <span className="text-xs text-muted-foreground font-mono">@{b.customers?.instagram_username}</span>
                       </div>
-                      <div className="flex items-col items-end gap-1">
-                        {getStatusBadge(b.status)}
-                        {getUrgencyBadge(b.urgency)}
-                      </div>
-                    </div>
 
-                    <div className="border-t border-border/60 my-1" />
+                      {/* Patient & Service Details */}
+                      <div className="mt-3 flex flex-col sm:flex-row sm:items-start justify-between gap-3">
+                        <div>
+                          <h4 className="font-bold text-sm text-foreground">
+                            {b.customers?.display_name || "Guest Patient"}
+                          </h4>
+                          <p className="text-xs text-muted-foreground font-mono">
+                            @{b.customers?.instagram_username}
+                          </p>
 
-                    <div className="grid grid-cols-2 gap-2 text-xs">
-                      <div>
-                        <p className="text-muted-foreground">Service</p>
-                        <p className="font-medium mt-0.5">{b.services?.name || "General Checkup"}</p>
-                      </div>
-                      <div>
-                        <p className="text-muted-foreground">Request Time</p>
-                        <p className="font-medium mt-0.5">
-                          {b.status === "CONFIRMED" && b.appointments?.[0] ? (
-                            <span className="text-emerald-600 dark:text-emerald-400 font-semibold">
-                              {new Date(b.appointments[0].appointment_date).toLocaleDateString(undefined, {
-                                month: "short",
-                                day: "numeric",
-                              })}{" "}
-                              · {b.appointments[0].start_time.slice(0, 5)}
-                            </span>
-                          ) : (
-                            <span>
-                              {b.preferred_date
-                                ? new Date(b.preferred_date).toLocaleDateString(undefined, {
-                                    month: "short",
-                                    day: "numeric",
-                                  })
-                                : "—"}{" "}
-                              · {b.preferred_time_text || "Flexible"}
-                            </span>
-                          )}
-                        </p>
-                      </div>
-                    </div>
-
-                    {b.customers?.phone && (
-                      <div className="flex items-center justify-between mt-1 text-xs border-t border-border/40 pt-2">
-                        <span className="font-mono text-muted-foreground">
-                          {formatIndianPhone(b.customers.phone)}
-                        </span>
-                        <div className="flex items-center gap-1.5">
-                          <Button
-                            asChild
-                            variant="outline"
-                            size="sm"
-                            className="h-6 text-[11px] px-2 text-blue-600 hover:bg-blue-500/10 border-blue-500/30"
-                          >
-                            <a href={getTelLink(b.customers.phone)}>
-                              <Phone className="h-2.5 w-2.5 mr-1" /> Call
-                            </a>
-                          </Button>
-                          <Button
-                            asChild
-                            variant="outline"
-                            size="sm"
-                            className="h-6 text-[11px] px-2 text-emerald-600 hover:bg-emerald-500/10 border-emerald-500/30"
-                          >
-                            <a
-                              href={getWhatsAppLink(
-                                b.customers.phone,
-                                `Hello ${b.customers?.display_name || ""}, regarding your dental booking...`
-                              )}
-                              target="_blank"
-                              rel="noopener noreferrer"
-                            >
-                              <MessageCircle className="h-2.5 w-2.5 mr-1" /> WhatsApp
-                            </a>
-                          </Button>
+                          {/* Service and Duration */}
+                          <div className="mt-2 flex items-center gap-1.5 text-xs">
+                            <span className="font-medium text-muted-foreground">Service:</span>
+                            <Badge variant="outline" className="text-xs py-0 font-medium">
+                              {b.services?.name || "General Checkup"} ({b.services?.duration_minutes || 30} mins)
+                            </Badge>
+                          </div>
                         </div>
-                      </div>
-                    )}
 
-                    {b.ai_summary && (
-                      <div className="mt-2 rounded-lg bg-primary/5 border border-primary/10 p-2.5">
-                        <p className="text-[11px] font-semibold text-primary flex items-center gap-1">
-                          <Sparkles className="h-3 w-3" /> AI Summary
-                        </p>
-                        <p className="text-[11px] text-muted-foreground mt-0.5 line-clamp-2 leading-relaxed">
-                          {b.ai_summary}
-                        </p>
+                        {/* Contact Info & 1-Click Call / WhatsApp (+91 format) */}
+                        {b.customers?.phone && (
+                          <div className="flex flex-col sm:items-end gap-1.5">
+                            <span className="text-xs font-mono font-medium text-foreground">
+                              {formatIndianPhone(b.customers.phone)}
+                            </span>
+                            <div className="flex items-center gap-1.5">
+                              <Button
+                                asChild
+                                variant="outline"
+                                size="sm"
+                                className="h-7 text-[11px] px-2 text-blue-600 hover:text-blue-700 hover:bg-blue-500/10 border-blue-500/30"
+                              >
+                                <a href={getTelLink(b.customers.phone)}>
+                                  <Phone className="h-3 w-3 mr-1" /> Call
+                                </a>
+                              </Button>
+                              <Button
+                                asChild
+                                variant="outline"
+                                size="sm"
+                                className="h-7 text-[11px] px-2 text-emerald-600 hover:text-emerald-700 hover:bg-emerald-500/10 border-emerald-500/30"
+                              >
+                                <a
+                                  href={getWhatsAppLink(
+                                    b.customers.phone,
+                                    `Hello ${b.customers?.display_name || ""}, this is regarding your dental appointment on ${selectedDate.toLocaleDateString(
+                                      undefined,
+                                      { weekday: "short", month: "short", day: "numeric" }
+                                    )} at our dental clinic.`
+                                  )}
+                                  target="_blank"
+                                  rel="noopener noreferrer"
+                                >
+                                  <MessageCircle className="h-3 w-3 mr-1" /> WhatsApp
+                                </a>
+                              </Button>
+                            </div>
+                          </div>
+                        )}
                       </div>
-                    )}
-                  </div>
 
-                  <Button
-                    className="w-full text-xs font-semibold"
-                    variant={b.status === "PENDING_STAFF" ? "default" : "outline"}
-                    size="sm"
-                    onClick={() => handleOpenBooking(b)}
-                  >
-                    {b.status === "PENDING_STAFF" ? "Process Request" : "Manage / Details"}
-                  </Button>
+                      {/* AI Summary */}
+                      {b.ai_summary && (
+                        <div className="mt-3 rounded-lg bg-primary/5 border border-primary/10 p-2.5 text-xs">
+                          <p className="font-semibold text-primary flex items-center gap-1 text-[11px] mb-0.5">
+                            <Sparkles className="h-3 w-3" /> AI Receptionist Summary
+                          </p>
+                          <p className="text-muted-foreground leading-relaxed text-[11px]">
+                            {b.ai_summary}
+                          </p>
+                        </div>
+                      )}
+
+                      {/* Patient Notes */}
+                      {b.patient_notes && !b.ai_summary && (
+                        <div className="mt-3 rounded-lg bg-secondary/30 border border-border p-2 text-xs text-muted-foreground">
+                          <span className="font-medium text-foreground">Notes: </span>
+                          {b.patient_notes}
+                        </div>
+                      )}
+                    </div>
+                  ))}
                 </div>
-              ))}
+              )}
             </div>
-          </>
+          </div>
         )}
       </div>
 
