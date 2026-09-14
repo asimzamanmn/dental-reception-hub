@@ -15,6 +15,8 @@ import {
   CheckCircle2,
   CalendarClock,
   ListFilter,
+  Trash2,
+  XCircle,
 } from "lucide-react";
 import { toast } from "sonner";
 import { AppShell } from "@/components/app-shell";
@@ -24,6 +26,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Skeleton } from "@/components/ui/skeleton";
+import { Switch } from "@/components/ui/switch";
 import { Calendar as CalendarPicker } from "@/components/ui/calendar";
 import {
   Select,
@@ -43,6 +46,11 @@ import {
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/hooks/use-auth";
 import { formatIndianPhone, getTelLink, getWhatsAppLink } from "@/lib/utils";
+import {
+  fetchWebchatBookings,
+  updateWebchatBookingStatus,
+  deleteWebchatBooking,
+} from "@/lib/webchat";
 
 function toDateKey(val: Date | string | null | undefined): string {
   if (!val) return "";
@@ -142,6 +150,7 @@ function CalendarPage() {
   const [endTime, setEndTime] = useState<string>("09:30");
   const [notes, setNotes] = useState<string>("");
   const [isDeclineMode, setIsDeclineMode] = useState<boolean>(false);
+  const [isDeleteMode, setIsDeleteMode] = useState<boolean>(false);
 
   // Manual Booking States
   const [isManualBookingOpen, setIsManualBookingOpen] = useState(false);
@@ -158,14 +167,28 @@ function CalendarPage() {
   const bookingsQuery = useQuery({
     queryKey: ["all-bookings"],
     queryFn: async () => {
-      const { data, error } = await supabase
-        .from("booking_requests")
-        .select(
-          "id, status, preferred_date, preferred_time_text, urgency, ai_summary, patient_notes, created_at, service_id, email, customers(display_name, instagram_username, phone), services(name, duration_minutes), appointments(id, appointment_date, start_time, end_time, notes)"
-        )
-        .order("created_at", { ascending: false });
-      if (error) throw error;
-      return (data || []) as any[];
+      const [publicRes, webchatBookings] = await Promise.all([
+        supabase
+          .from("booking_requests")
+          .select(
+            "id, status, preferred_date, preferred_time_text, urgency, ai_summary, patient_notes, created_at, service_id, email, customers(display_name, instagram_username, phone), services(name, duration_minutes), appointments(id, appointment_date, start_time, end_time, notes)"
+          )
+          .order("created_at", { ascending: false }),
+        fetchWebchatBookings(),
+      ]);
+
+      if (publicRes.error) throw publicRes.error;
+
+      const publicList = (publicRes.data || []).map((b: any) => ({
+        ...b,
+        source: "instagram" as const,
+      }));
+
+      const combined = [...publicList, ...webchatBookings];
+      combined.sort(
+        (a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
+      );
+      return combined;
     },
   });
 
@@ -196,16 +219,23 @@ function CalendarPage() {
       end: string;
       notesText: string;
     }) => {
-      const { error: updateError } = await supabase
-        .from("booking_requests")
-        .update({
-          status: "CONFIRMED",
-          confirmed_at: new Date().toISOString(),
-          reviewed_at: new Date().toISOString(),
-          reviewed_by: role === "admin" ? "Admin" : "Staff",
-        })
-        .eq("id", bookingId);
-      if (updateError) throw updateError;
+      const booking = bookingsQuery.data?.find((b) => b.id === bookingId);
+      const isWebchat = booking?.source === "webchat";
+
+      if (isWebchat) {
+        await updateWebchatBookingStatus(bookingId, "CONFIRMED");
+      } else {
+        const { error: updateError } = await supabase
+          .from("booking_requests")
+          .update({
+            status: "CONFIRMED",
+            confirmed_at: new Date().toISOString(),
+            reviewed_at: new Date().toISOString(),
+            reviewed_by: role === "admin" ? "Admin" : "Staff",
+          })
+          .eq("id", bookingId);
+        if (updateError) throw updateError;
+      }
 
       // Check if appointment already exists (rescheduling)
       const { data: existingAppt } = await supabase
@@ -236,7 +266,9 @@ function CalendarPage() {
           status: "SCHEDULED",
           notes: notesText || null,
         });
-        if (insertError) throw insertError;
+        if (insertError) {
+          console.warn("Could not insert linked appointment:", insertError.message);
+        }
       }
     },
     onSuccess: (_, variables) => {
@@ -268,15 +300,20 @@ function CalendarPage() {
 
   const declineMutation = useMutation({
     mutationFn: async (bookingId: string) => {
-      const { error } = await supabase
-        .from("booking_requests")
-        .update({
-          status: "DECLINED",
-          reviewed_at: new Date().toISOString(),
-          reviewed_by: role === "admin" ? "Admin" : "Staff",
-        })
-        .eq("id", bookingId);
-      if (error) throw error;
+      const booking = bookingsQuery.data?.find((b) => b.id === bookingId);
+      if (booking?.source === "webchat") {
+        await updateWebchatBookingStatus(bookingId, "DECLINED");
+      } else {
+        const { error } = await supabase
+          .from("booking_requests")
+          .update({
+            status: "DECLINED",
+            reviewed_at: new Date().toISOString(),
+            reviewed_by: role === "admin" ? "Admin" : "Staff",
+          })
+          .eq("id", bookingId);
+        if (error) throw error;
+      }
     },
     onSuccess: () => {
       toast.success("Booking request declined.");
@@ -286,6 +323,41 @@ function CalendarPage() {
     },
     onError: (err: any) => {
       toast.error("Failed to decline booking: " + err.message);
+    },
+  });
+
+  const deleteBookingMutation = useMutation({
+    mutationFn: async (bookingId: string) => {
+      const booking = bookingsQuery.data?.find((b) => b.id === bookingId);
+      if (booking?.source === "webchat") {
+        await deleteWebchatBooking(bookingId);
+      } else {
+        const { error: apptErr } = await supabase
+          .from("appointments")
+          .delete()
+          .eq("booking_request_id", bookingId);
+        if (apptErr) console.warn("Failed deleting linked appointments:", apptErr);
+
+        const { error } = await supabase
+          .from("booking_requests")
+          .delete()
+          .eq("id", bookingId);
+        if (error) throw error;
+      }
+    },
+    onSuccess: () => {
+      toast.success("Pending booking request deleted successfully.");
+      setSelectedBooking(null);
+      setIsRescheduleMode(false);
+      setIsDeclineMode(false);
+      setIsDeleteMode(false);
+      void queryClient.invalidateQueries({ queryKey: ["all-bookings"] });
+      void queryClient.invalidateQueries({ queryKey: ["dashboard-pending-bookings"] });
+      void queryClient.invalidateQueries({ queryKey: ["calendar-appointments"] });
+      void queryClient.invalidateQueries({ queryKey: ["calendar-requests"] });
+    },
+    onError: (err: any) => {
+      toast.error("Failed to delete booking request: " + err.message);
     },
   });
 
@@ -413,6 +485,7 @@ function CalendarPage() {
     setAppointmentDate(existingAppt?.appointment_date || booking.preferred_date || "");
     setNotes(existingAppt?.notes || booking.patient_notes || "");
     setIsDeclineMode(false);
+    setIsDeleteMode(false);
     setIsRescheduleMode(false);
 
     if (existingAppt?.start_time) {
@@ -878,12 +951,29 @@ function CalendarPage() {
                       {/* Patient & Service Details */}
                       <div className="mt-3 flex flex-col sm:flex-row sm:items-start justify-between gap-3">
                         <div>
-                          <h4 className="font-bold text-sm text-foreground">
-                            {b.customers?.display_name || "Guest Patient"}
-                          </h4>
-                          <p className="text-xs text-muted-foreground font-mono">
-                            @{b.customers?.instagram_username}
-                          </p>
+                          <div className="flex items-center gap-1.5 flex-wrap">
+                            <h4 className="font-bold text-sm text-foreground">
+                              {b.customers?.display_name || "Guest Patient"}
+                            </h4>
+                            {b.source === "webchat" ? (
+                              <Badge variant="outline" className="bg-sky-500/10 text-sky-600 dark:text-sky-400 border-sky-500/25 text-[10px] px-1.5 py-0 font-semibold">
+                                Webchat
+                              </Badge>
+                            ) : (
+                              <Badge variant="outline" className="bg-pink-500/10 text-pink-600 dark:text-pink-400 border-pink-500/25 text-[10px] px-1.5 py-0 font-medium">
+                                Instagram
+                              </Badge>
+                            )}
+                          </div>
+                          {b.customers?.instagram_username ? (
+                            <p className="text-xs text-muted-foreground font-mono">
+                              @{b.customers.instagram_username}
+                            </p>
+                          ) : b.source === "webchat" && b.session_id ? (
+                            <p className="text-xs text-muted-foreground font-mono">
+                              Session #{b.session_id.slice(0, 8)}
+                            </p>
+                          ) : null}
 
                           {/* Service and Duration */}
                           <div className="mt-2 flex items-center gap-1.5 text-xs">
@@ -971,6 +1061,8 @@ function CalendarPage() {
           if (!o) {
             setSelectedBooking(null);
             setIsRescheduleMode(false);
+            setIsDeclineMode(false);
+            setIsDeleteMode(false);
           }
         }}
       >
@@ -983,14 +1075,33 @@ function CalendarPage() {
                 ? "Reschedule Appointment"
                 : "Booking Request Details"}
             </DialogTitle>
-            <DialogDescription className="text-xs">
-              Patient: {selectedBooking?.customers?.display_name || "Guest User"} (@{selectedBooking?.customers?.instagram_username})
+            <DialogDescription className="text-xs flex items-center gap-1.5 flex-wrap">
+              <span>Patient: {selectedBooking?.customers?.display_name || "Guest User"}</span>
+              {selectedBooking?.source === "webchat" ? (
+                <Badge variant="outline" className="bg-sky-500/10 text-sky-600 dark:text-sky-400 border-sky-500/25 text-[10px] px-1.5 py-0 font-semibold">
+                  Webchat
+                </Badge>
+              ) : selectedBooking?.customers?.instagram_username ? (
+                <span className="font-mono">(@{selectedBooking.customers.instagram_username})</span>
+              ) : null}
             </DialogDescription>
           </DialogHeader>
 
           <div className="grid gap-4 py-2">
             {/* Urgency and AI Summary details */}
             <div className="grid gap-2 border border-border rounded-lg p-3 bg-secondary/20">
+              <div className="flex items-center justify-between text-xs">
+                <span className="text-muted-foreground">Source Channel:</span>
+                {selectedBooking?.source === "webchat" ? (
+                  <Badge variant="outline" className="bg-sky-500/10 text-sky-600 dark:text-sky-400 border-sky-500/25 text-[10px] px-1.5 py-0 font-semibold">
+                    Webchat
+                  </Badge>
+                ) : (
+                  <Badge variant="outline" className="bg-pink-500/10 text-pink-600 dark:text-pink-400 border-pink-500/25 text-[10px] px-1.5 py-0 font-medium">
+                    Instagram
+                  </Badge>
+                )}
+              </div>
               <div className="flex items-center justify-between text-xs">
                 <span className="text-muted-foreground">Urgency Level:</span>
                 {selectedBooking && getUrgencyBadge(selectedBooking.urgency)}
@@ -1091,21 +1202,80 @@ function CalendarPage() {
             {(selectedBooking?.status === "PENDING_STAFF" || isRescheduleMode) && (
               <div className="border-t border-border pt-4 grid gap-3">
                 {selectedBooking?.status === "PENDING_STAFF" && (
-                  <div className="flex items-center gap-2 mb-1">
-                    <input
-                      type="checkbox"
-                      id="decline-mode"
-                      className="rounded border-border text-primary focus:ring-primary h-4 w-4"
-                      checked={isDeclineMode}
-                      onChange={(e) => setIsDeclineMode(e.target.checked)}
-                    />
-                    <Label htmlFor="decline-mode" className="text-xs font-semibold text-destructive cursor-pointer">
-                      Decline this booking request instead
-                    </Label>
+                  <div className="space-y-2 mb-1">
+                    {/* Switch to Delete Pending Booking Request */}
+                    <div className="flex items-center justify-between rounded-lg border border-destructive/25 bg-destructive/5 p-2.5 transition-colors">
+                      <div className="flex items-center gap-2">
+                        <Trash2 className="h-4 w-4 text-destructive shrink-0" />
+                        <div>
+                          <Label htmlFor="delete-mode-switch-cal" className="text-xs font-semibold text-destructive cursor-pointer">
+                            Delete pending booking request
+                          </Label>
+                          <p className="text-[11px] text-muted-foreground">
+                            Permanently erase this request from the database
+                          </p>
+                        </div>
+                      </div>
+                      <Switch
+                        id="delete-mode-switch-cal"
+                        checked={isDeleteMode}
+                        onCheckedChange={(checked) => {
+                          setIsDeleteMode(checked);
+                          if (checked) setIsDeclineMode(false);
+                        }}
+                      />
+                    </div>
+
+                    {/* Switch to Decline Booking Request */}
+                    {!isDeleteMode && (
+                      <div className="flex items-center justify-between rounded-lg border border-border bg-secondary/15 p-2.5 transition-colors">
+                        <div className="flex items-center gap-2">
+                          <XCircle className="h-4 w-4 text-amber-600 dark:text-amber-400 shrink-0" />
+                          <div>
+                            <Label htmlFor="decline-mode-switch-cal" className="text-xs font-semibold text-foreground cursor-pointer">
+                              Decline booking request
+                            </Label>
+                            <p className="text-[11px] text-muted-foreground">
+                              Mark request as declined without deleting it
+                            </p>
+                          </div>
+                        </div>
+                        <Switch
+                          id="decline-mode-switch-cal"
+                          checked={isDeclineMode}
+                          onCheckedChange={(checked) => {
+                            setIsDeclineMode(checked);
+                            if (checked) setIsDeleteMode(false);
+                          }}
+                        />
+                      </div>
+                    )}
                   </div>
                 )}
 
-                {!isDeclineMode && (
+                {isDeleteMode ? (
+                  <div className="rounded-lg border border-destructive/30 bg-destructive/10 p-3.5 space-y-1.5 text-destructive animate-in fade-in duration-200">
+                    <div className="flex items-center gap-2 font-semibold text-xs">
+                      <AlertTriangle className="h-4 w-4 shrink-0" />
+                      <span>Permanent Deletion Warning</span>
+                    </div>
+                    <p className="text-[11px] text-destructive/90 leading-relaxed">
+                      Are you sure you want to permanently delete this pending booking request for{" "}
+                      <strong className="font-semibold">{selectedBooking?.customers?.display_name || "Guest"}</strong>?
+                      This action cannot be undone.
+                    </p>
+                  </div>
+                ) : isDeclineMode ? (
+                  <div className="rounded-lg border border-amber-500/30 bg-amber-500/10 p-3.5 space-y-1.5 text-amber-700 dark:text-amber-400 animate-in fade-in duration-200">
+                    <div className="flex items-center gap-2 font-semibold text-xs">
+                      <AlertTriangle className="h-4 w-4 shrink-0" />
+                      <span>Decline Booking Request</span>
+                    </div>
+                    <p className="text-[11px] text-muted-foreground leading-relaxed">
+                      This will change the request status to DECLINED. The customer record will be preserved.
+                    </p>
+                  </div>
+                ) : (
                   <div className="grid gap-3">
                     <div className="grid gap-1.5">
                       <Label htmlFor="app-date" className="text-xs">
@@ -1167,6 +1337,8 @@ function CalendarPage() {
               onClick={() => {
                 setSelectedBooking(null);
                 setIsRescheduleMode(false);
+                setIsDeclineMode(false);
+                setIsDeleteMode(false);
               }}
             >
               {selectedBooking?.status === "PENDING_STAFF" || isRescheduleMode ? "Cancel" : "Close"}
@@ -1174,7 +1346,18 @@ function CalendarPage() {
 
             {selectedBooking?.status === "PENDING_STAFF" && (
               <>
-                {isDeclineMode ? (
+                {isDeleteMode ? (
+                  <Button
+                    variant="destructive"
+                    size="sm"
+                    className="font-semibold shadow-xs"
+                    onClick={() => deleteBookingMutation.mutate(selectedBooking.id)}
+                    disabled={deleteBookingMutation.isPending}
+                  >
+                    <Trash2 className="h-3.5 w-3.5 mr-1.5" />
+                    {deleteBookingMutation.isPending ? "Deleting..." : "Permanently Delete Request"}
+                  </Button>
+                ) : isDeclineMode ? (
                   <Button
                     variant="destructive"
                     size="sm"

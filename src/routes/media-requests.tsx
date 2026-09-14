@@ -41,6 +41,11 @@ import { supabase } from "@/integrations/supabase/client";
 import { formatDateTime, type MediaRequest } from "@/lib/db";
 import { useAuth } from "@/hooks/use-auth";
 import { formatIndianPhone, getCleanIndianPhone, getTelLink, getWhatsAppLink } from "@/lib/utils";
+import {
+  fetchWebchatMediaRequests,
+  updateWebchatMediaStatus,
+  incrementWebchatMediaContact,
+} from "@/lib/webchat";
 
 export const Route = createFileRoute("/media-requests")({
   head: () => ({
@@ -70,6 +75,7 @@ interface PatientGroup {
   allResolved: boolean;
   hasPending: boolean;
   contact_attempts: number;
+  source?: "instagram" | "webchat";
 }
 
 function MediaRequestsPage() {
@@ -91,17 +97,30 @@ function MediaRequestsPage() {
     title: string;
   } | null>(null);
 
-  // Fetch Media Requests
+  // Fetch Media Requests (merging Instagram and Webchat)
   const mediaQuery = useQuery({
     queryKey: ["media-requests"],
     queryFn: async () => {
-      const { data, error } = await supabase
-        .from("media_requests")
-        .select("*")
-        .order("created_at", { ascending: false });
+      const [publicRes, webchatItems] = await Promise.all([
+        supabase
+          .from("media_requests")
+          .select("*")
+          .order("created_at", { ascending: false }),
+        fetchWebchatMediaRequests(),
+      ]);
 
-      if (error) throw error;
-      return (data ?? []) as MediaRequest[];
+      if (publicRes.error) throw publicRes.error;
+
+      const publicList = (publicRes.data ?? []).map((item: any) => ({
+        ...item,
+        source: "instagram" as const,
+      }));
+
+      const combined = [...publicList, ...webchatItems];
+      combined.sort(
+        (a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
+      );
+      return combined as MediaRequest[];
     },
   });
 
@@ -117,22 +136,36 @@ function MediaRequestsPage() {
       ids: string[];
       newStatus: "RESOLVED" | "CONTACTED" | "PENDING_STAFF";
     }) => {
-      const isResolving = newStatus === "RESOLVED";
-      const { error } = await supabase
-        .from("media_requests")
-        .update({
-          status: newStatus,
-          resolved_at: isResolving ? new Date().toISOString() : null,
-        })
-        .in("id", ids);
-      if (error) throw error;
+      const allItems = mediaQuery.data ?? [];
+      const webchatIds = ids.filter(
+        (id) => allItems.find((i) => i.id === id)?.source === "webchat"
+      );
+      const publicIds = ids.filter(
+        (id) => allItems.find((i) => i.id === id)?.source !== "webchat"
+      );
+
+      if (webchatIds.length > 0) {
+        await updateWebchatMediaStatus(webchatIds, newStatus);
+      }
+
+      if (publicIds.length > 0) {
+        const isResolving = newStatus === "RESOLVED";
+        const { error } = await supabase
+          .from("media_requests")
+          .update({
+            status: newStatus,
+            resolved_at: isResolving ? new Date().toISOString() : null,
+          })
+          .in("id", publicIds);
+        if (error) throw error;
+      }
     },
     onSuccess: (_, { newStatus, ids }) => {
       if (newStatus === "RESOLVED") {
         toast.success(
           ids.length > 1
             ? `Marked ${ids.length} requests as resolved! Moved to Resolved section.`
-            : "Marked as resolved! Moved to Resolved section.",
+            : "Marked as resolved! Moved to Resolved section."
         );
       } else {
         toast.success("Reopened and moved back to Pending section");
@@ -153,14 +186,28 @@ function MediaRequestsPage() {
       ids: string[];
       currentAttempts: number;
     }) => {
-      const { error } = await supabase
-        .from("media_requests")
-        .update({
-          contact_attempts: (currentAttempts || 0) + 1,
-          status: "CONTACTED",
-        })
-        .in("id", ids);
-      if (error) throw error;
+      const allItems = mediaQuery.data ?? [];
+      const webchatIds = ids.filter(
+        (id) => allItems.find((i) => i.id === id)?.source === "webchat"
+      );
+      const publicIds = ids.filter(
+        (id) => allItems.find((i) => i.id === id)?.source !== "webchat"
+      );
+
+      if (webchatIds.length > 0) {
+        await incrementWebchatMediaContact(webchatIds, currentAttempts);
+      }
+
+      if (publicIds.length > 0) {
+        const { error } = await supabase
+          .from("media_requests")
+          .update({
+            contact_attempts: (currentAttempts || 0) + 1,
+            status: "CONTACTED",
+          })
+          .in("id", publicIds);
+        if (error) throw error;
+      }
     },
     onSuccess: () => {
       toast.success("Logged patient call attempt");
@@ -240,14 +287,17 @@ function MediaRequestsPage() {
         }
       }
 
-      // 3. Search query (name, phone, note)
+      // 3. Search query (name, phone, note, or channel)
       if (searchQuery.trim()) {
         const q = searchQuery.toLowerCase().trim();
         const matchName = (item.customer_name || "").toLowerCase().includes(q);
         const matchPhone = (item.customer_phone || "").toLowerCase().includes(q);
         const matchFormattedPhone = formatIndianPhone(item.customer_phone).toLowerCase().includes(q);
         const matchNote = (item.patient_note || "").toLowerCase().includes(q);
-        return matchName || matchPhone || matchFormattedPhone || matchNote;
+        const matchChannel =
+          (item.source === "webchat" && "webchat".includes(q)) ||
+          (item.source !== "webchat" && "instagram".includes(q));
+        return matchName || matchPhone || matchFormattedPhone || matchNote || matchChannel;
       }
 
       return true;
@@ -271,13 +321,16 @@ function MediaRequestsPage() {
           groupKey,
           customer_id: item.customer_id,
           conversation_id: item.conversation_id,
-          customer_name: item.customer_name || "Instagram Patient",
+          customer_name:
+            item.customer_name ||
+            (item.source === "webchat" ? "Webchat Patient" : "Instagram Patient"),
           customer_phone: item.customer_phone,
           items: [],
           latestCreatedAt: item.created_at,
           allResolved: true,
           hasPending: false,
           contact_attempts: item.contact_attempts || 0,
+          source: item.source || "instagram",
         });
       }
 
@@ -835,6 +888,15 @@ function PatientChatThreadCard({
           <div>
             <div className="flex items-center gap-2 flex-wrap">
               <h4 className="text-base font-semibold text-foreground">{name}</h4>
+              {group.source === "webchat" ? (
+                <Badge variant="outline" className="bg-sky-500/10 text-sky-600 dark:text-sky-400 border-sky-500/25 text-[10px] font-semibold">
+                  Webchat
+                </Badge>
+              ) : (
+                <Badge variant="outline" className="bg-pink-500/10 text-pink-600 dark:text-pink-400 border-pink-500/25 text-[10px] font-medium">
+                  Instagram
+                </Badge>
+              )}
 
               {/* Badges for media inside this chat */}
               <div className="flex items-center gap-1">
@@ -1088,11 +1150,19 @@ function PatientChatThreadCard({
           )}
           {group.conversation_id && (
             <button
-              onClick={() => onCopy(group.conversation_id, "Conversation ID")}
+              onClick={() =>
+                onCopy(
+                  group.conversation_id,
+                  group.source === "webchat" ? "Session ID" : "Conversation ID"
+                )
+              }
               className="inline-flex items-center gap-1 hover:text-foreground transition-colors font-mono text-[10px]"
-              title="Copy Conversation ID"
+              title={group.source === "webchat" ? "Copy Session ID" : "Copy Conversation ID"}
             >
-              <Copy className="h-3 w-3" /> Conv #{group.conversation_id.slice(0, 6)}
+              <Copy className="h-3 w-3" />{" "}
+              {group.source === "webchat"
+                ? `Session #${group.conversation_id.slice(0, 8)}`
+                : `Conv #${group.conversation_id.slice(0, 6)}`}
             </button>
           )}
         </div>
@@ -1152,8 +1222,17 @@ function IndividualMediaCard({
             {initials}
           </div>
           <div>
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-2 flex-wrap">
               <h4 className="text-sm font-semibold text-foreground">{name}</h4>
+              {item.source === "webchat" ? (
+                <Badge variant="outline" className="bg-sky-500/10 text-sky-600 dark:text-sky-400 border-sky-500/25 text-[10px] font-semibold">
+                  Webchat
+                </Badge>
+              ) : (
+                <Badge variant="outline" className="bg-pink-500/10 text-pink-600 dark:text-pink-400 border-pink-500/25 text-[10px] font-medium">
+                  Instagram
+                </Badge>
+              )}
               {mediaType === "image" && (
                 <span className="inline-flex items-center gap-1 rounded bg-purple-500/10 px-2 py-0.5 text-[10px] font-medium text-purple-600 dark:text-purple-400 border border-purple-500/20">
                   <ImageIcon className="h-3 w-3" /> Image

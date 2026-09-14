@@ -109,8 +109,16 @@ export type RecentBooking = {
   urgency: number | null;
   ai_summary: string | null;
   created_at: string | null;
-  customers: { display_name: string | null; instagram_username: string | null } | null;
-  services: { name: string } | null;
+  source?: "instagram" | "webchat";
+  customers: { display_name: string | null; instagram_username: string | null; phone?: string | null } | null;
+  services: { name: string; duration_minutes?: number } | null;
+  appointments?: Array<{
+    id?: string;
+    appointment_date: string;
+    start_time: string;
+    end_time: string;
+    notes?: string | null;
+  }> | null;
 };
 
 export type MediaRequest = {
@@ -127,6 +135,8 @@ export type MediaRequest = {
   status: "pending" | "resolved" | "contacted" | string;
   created_at: string;
   resolved_at: string | null;
+  source?: "instagram" | "webchat";
+  session_id?: string | null;
 };
 
 export const WEEKDAYS = [
