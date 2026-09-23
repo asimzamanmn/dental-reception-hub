@@ -15,6 +15,7 @@ import {
   Trash2,
   AlertTriangle,
   XCircle,
+  Instagram,
 } from "lucide-react";
 import { toast } from "sonner";
 import { AppShell } from "@/components/app-shell";
@@ -138,6 +139,11 @@ function BookingsPage() {
   const [manualEndTime, setManualEndTime] = useState("09:30");
   const [manualNotes, setManualNotes] = useState("");
 
+  // Instagram Message States
+  const [isIgMessageOpen, setIsIgMessageOpen] = useState(false);
+  const [igMessageText, setIgMessageText] = useState("");
+  const [igMessageCustomer, setIgMessageCustomer] = useState<any>(null);
+
   // Queries
   const bookingsQuery = useQuery({
     queryKey: ["all-bookings"],
@@ -146,7 +152,7 @@ function BookingsPage() {
         supabase
           .from("booking_requests")
           .select(
-            "id, status, preferred_date, preferred_time_text, urgency, ai_summary, patient_notes, created_at, service_id, email, customers(display_name, instagram_username, phone), services(name, duration_minutes), appointments(id, appointment_date, start_time, end_time, notes)"
+            "id, status, preferred_date, preferred_time_text, urgency, ai_summary, patient_notes, created_at, service_id, email, customers(display_name, instagram_username, instagram_user_id, phone), services(name, duration_minutes), appointments(id, appointment_date, start_time, end_time, notes)"
           )
           .order("created_at", { ascending: false }),
         fetchWebchatBookings(),
@@ -178,6 +184,36 @@ function BookingsPage() {
       if (error) throw error;
       return data || [];
     },
+  });
+
+  const sendIgMessageMutation = useMutation({
+    mutationFn: async () => {
+      const url = localStorage.getItem("n8n_instagram_webhook_url") || "https://n8n.srv1893940.hstgr.cloud/webhook/ig-send";
+      if (!igMessageText.trim()) throw new Error("Message cannot be empty.");
+      if (!igMessageCustomer?.instagram_user_id) throw new Error("This customer does not have an Instagram ID associated.");
+
+      const payload = {
+        instagram_user_id: igMessageCustomer.instagram_user_id,
+        message_text: igMessageText,
+      };
+
+      const res = await fetch(url, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+
+      if (!res.ok) throw new Error("Webhook failed with status " + res.status);
+    },
+    onSuccess: () => {
+      toast.success("Message sent successfully!");
+      setIsIgMessageOpen(false);
+      setIgMessageText("");
+      setIgMessageCustomer(null);
+    },
+    onError: (e: Error) => {
+      toast.error(e.message);
+    }
   });
 
   // Mutations
@@ -652,11 +688,9 @@ function BookingsPage() {
                               </Badge>
                             )}
                           </div>
-                          {b.customers?.instagram_username ? (
-                            <span className="text-xs text-muted-foreground font-mono">@{b.customers.instagram_username}</span>
-                          ) : b.source === "webchat" && b.session_id ? (
+                          {b.source === "webchat" && b.session_id && (
                             <span className="text-xs text-muted-foreground font-mono">Session #{b.session_id.slice(0, 8)}</span>
-                          ) : null}
+                          )}
                           {b.customers?.phone && (
                             <div className="flex items-center gap-1.5 mt-0.5">
                               <span className="text-xs text-muted-foreground font-mono">
@@ -778,11 +812,9 @@ function BookingsPage() {
                             </Badge>
                           )}
                         </div>
-                        {b.customers?.instagram_username ? (
-                          <span className="text-xs text-muted-foreground font-mono">@{b.customers.instagram_username}</span>
-                        ) : b.source === "webchat" && b.session_id ? (
-                          <span className="text-xs text-muted-foreground font-mono">Session #{b.session_id.slice(0, 8)}</span>
-                        ) : null}
+                        {b.source === "webchat" && b.session_id && (
+                          <span className="text-xs text-muted-foreground font-mono mt-0.5">Session #{b.session_id.slice(0, 8)}</span>
+                        )}
                       </div>
                       <div className="flex items-col items-end gap-1">
                         {getStatusBadge(b.status)}
@@ -986,31 +1018,52 @@ function BookingsPage() {
               </div>
             )}
 
-            {selectedBooking?.customers?.phone && (
-              <div className="flex items-center justify-between text-xs border border-border rounded-md p-2.5 bg-background">
-                <span className="text-muted-foreground font-medium">Contact Phone:</span>
-                <div className="flex items-center gap-2">
-                  <span className="font-mono font-semibold">{formatIndianPhone(selectedBooking.customers.phone)}</span>
-                  <a
-                    href={getTelLink(selectedBooking.customers.phone)}
-                    title="Call"
-                    className="text-blue-500 hover:text-blue-600"
-                  >
-                    <Phone className="h-3.5 w-3.5" />
-                  </a>
-                  <a
-                    href={getWhatsAppLink(
-                      selectedBooking.customers.phone,
-                      `Hello ${selectedBooking.customers?.display_name || ""}, regarding your dental booking...`
-                    )}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    title="WhatsApp"
-                    className="text-emerald-500 hover:text-emerald-600"
-                  >
-                    <MessageCircle className="h-3.5 w-3.5" />
-                  </a>
-                </div>
+            {(selectedBooking?.customers?.phone || selectedBooking?.customers?.instagram_user_id) && (
+              <div className="grid gap-2">
+                {selectedBooking?.customers?.phone && (
+                  <div className="flex items-center justify-between text-xs border border-border rounded-md p-2.5 bg-background">
+                    <span className="text-muted-foreground font-medium">Contact Phone:</span>
+                    <div className="flex items-center gap-2">
+                      <span className="font-mono font-semibold">{formatIndianPhone(selectedBooking.customers.phone)}</span>
+                      <a
+                        href={getTelLink(selectedBooking.customers.phone)}
+                        title="Call"
+                        className="text-blue-500 hover:text-blue-600"
+                      >
+                        <Phone className="h-3.5 w-3.5" />
+                      </a>
+                      <a
+                        href={getWhatsAppLink(
+                          selectedBooking.customers.phone,
+                          `Hello ${selectedBooking.customers?.display_name || ""}, regarding your dental booking...`
+                        )}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        title="WhatsApp"
+                        className="text-emerald-500 hover:text-emerald-600"
+                      >
+                        <MessageCircle className="h-3.5 w-3.5" />
+                      </a>
+                    </div>
+                  </div>
+                )}
+                
+                {selectedBooking?.customers?.instagram_user_id && (
+                  <div className="flex items-center justify-between text-xs border border-border rounded-md p-2.5 bg-background">
+                    <span className="text-muted-foreground font-medium">Instagram Contact:</span>
+                    <button
+                      onClick={() => {
+                        setIgMessageCustomer(selectedBooking.customers);
+                        setIsIgMessageOpen(true);
+                      }}
+                      title="Send Message on Instagram"
+                      className="flex items-center gap-1.5 text-pink-500 hover:text-pink-600 font-semibold"
+                    >
+                      <Instagram className="h-3.5 w-3.5" />
+                      <span>Send Message</span>
+                    </button>
+                  </div>
+                )}
               </div>
             )}
 
@@ -1376,6 +1429,42 @@ function BookingsPage() {
               </Button>
             </DialogFooter>
           </form>
+        </DialogContent>
+      </Dialog>
+
+      {/* Instagram Message Dialog */}
+      <Dialog open={isIgMessageOpen} onOpenChange={setIsIgMessageOpen}>
+        <DialogContent className="sm:max-w-[425px]">
+          <DialogHeader>
+            <DialogTitle>Send Instagram Message</DialogTitle>
+            <DialogDescription className="text-xs">
+              Sending a message to {igMessageCustomer?.display_name || igMessageCustomer?.instagram_username}
+            </DialogDescription>
+          </DialogHeader>
+          <div className="grid gap-4 py-4">
+            <div className="grid gap-1.5">
+              <Label htmlFor="ig-message">Message</Label>
+              <Textarea
+                id="ig-message"
+                placeholder="Type your message here..."
+                rows={4}
+                value={igMessageText}
+                onChange={(e) => setIgMessageText(e.target.value)}
+              />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="ghost" size="sm" onClick={() => setIsIgMessageOpen(false)}>
+              Cancel
+            </Button>
+            <Button
+              size="sm"
+              onClick={() => sendIgMessageMutation.mutate()}
+              disabled={sendIgMessageMutation.isPending || !igMessageText.trim()}
+            >
+              {sendIgMessageMutation.isPending ? "Sending..." : "Send"}
+            </Button>
+          </DialogFooter>
         </DialogContent>
       </Dialog>
     </AppShell>

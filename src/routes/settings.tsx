@@ -74,9 +74,18 @@ function SettingsPage() {
     () => localStorage.getItem("n8n_email_webhook_url") || ""
   );
 
+  const [instagramWebhookUrl, setInstagramWebhookUrl] = useState(
+    () => localStorage.getItem("n8n_instagram_webhook_url") || "https://n8n.srv1893940.hstgr.cloud/webhook/ig-send"
+  );
+
   const handleSaveWebhook = () => {
     localStorage.setItem("n8n_email_webhook_url", webhookUrl.trim());
     toast.success("n8n webhook URL saved locally!");
+  };
+
+  const handleSaveInstagramWebhook = () => {
+    localStorage.setItem("n8n_instagram_webhook_url", instagramWebhookUrl.trim());
+    toast.success("n8n Instagram webhook URL saved locally!");
   };
 
   // Query authorized emails (only for admin)
@@ -288,7 +297,7 @@ function SettingsPage() {
             <p className="text-sm font-medium">n8n Email Integration</p>
             <div className="mt-3 grid gap-4">
               <div className="grid gap-1.5">
-                <Label htmlFor="webhook-url">n8n Webhook URL</Label>
+                <Label htmlFor="webhook-url">n8n Email Webhook URL</Label>
                 <div className="flex gap-2">
                   <Input
                     id="webhook-url"
@@ -300,6 +309,25 @@ function SettingsPage() {
                   />
                   {role === "admin" && (
                     <Button onClick={handleSaveWebhook} size="sm" className="font-semibold">
+                      Save
+                    </Button>
+                  )}
+                </div>
+              </div>
+              
+              <div className="grid gap-1.5 mt-2">
+                <Label htmlFor="ig-webhook-url">n8n Instagram Webhook URL (For sending DMs)</Label>
+                <div className="flex gap-2">
+                  <Input
+                    id="ig-webhook-url"
+                    type="url"
+                    placeholder="https://your-n8n.webhook.url/ig-send"
+                    value={instagramWebhookUrl}
+                    onChange={(e) => setInstagramWebhookUrl(e.target.value)}
+                    disabled={role === "staff"}
+                  />
+                  {role === "admin" && (
+                    <Button onClick={handleSaveInstagramWebhook} size="sm" className="font-semibold">
                       Save
                     </Button>
                   )}

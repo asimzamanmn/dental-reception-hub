@@ -137,6 +137,7 @@ export type MediaRequest = {
   resolved_at: string | null;
   source?: "instagram" | "webchat";
   session_id?: string | null;
+  customers?: { instagram_user_id: string | null } | null;
 };
 
 export const WEEKDAYS = [

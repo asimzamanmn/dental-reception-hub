@@ -25,17 +25,22 @@ import {
   MessageSquare,
   ArrowRight,
   Archive,
+  Instagram,
 } from "lucide-react";
 import { AppShell } from "@/components/app-shell";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
+import { Label } from "@/components/ui/label";
+import { Textarea } from "@/components/ui/textarea";
 import {
   Dialog,
   DialogContent,
   DialogHeader,
   DialogTitle,
+  DialogFooter,
+  DialogDescription,
 } from "@/components/ui/dialog";
 import { supabase } from "@/integrations/supabase/client";
 import { formatDateTime, type MediaRequest } from "@/lib/db";
@@ -97,6 +102,46 @@ function MediaRequestsPage() {
     title: string;
   } | null>(null);
 
+  // Instagram Message States
+  const [isIgMessageOpen, setIsIgMessageOpen] = useState(false);
+  const [igMessageText, setIgMessageText] = useState("");
+  const [igMessageCustomer, setIgMessageCustomer] = useState<{ instagram_user_id: string; display_name: string } | null>(null);
+
+  const sendIgMessageMutation = useMutation({
+    mutationFn: async () => {
+      const url = localStorage.getItem("n8n_instagram_webhook_url") || "https://n8n.srv1893940.hstgr.cloud/webhook/ig-send";
+      if (!igMessageText.trim()) throw new Error("Message cannot be empty.");
+      if (!igMessageCustomer?.instagram_user_id) throw new Error("This customer does not have an Instagram ID associated.");
+
+      const payload = {
+        instagram_user_id: igMessageCustomer.instagram_user_id,
+        message_text: igMessageText,
+      };
+
+      const res = await fetch(url, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+
+      if (!res.ok) throw new Error("Webhook failed with status " + res.status);
+    },
+    onSuccess: () => {
+      toast.success("Message sent successfully!");
+      setIsIgMessageOpen(false);
+      setIgMessageText("");
+      setIgMessageCustomer(null);
+    },
+    onError: (e: Error) => {
+      toast.error(e.message);
+    }
+  });
+
+  const handleOpenIgMessage = (customer_id: string, customer_name: string) => {
+    setIgMessageCustomer({ instagram_user_id: customer_id, display_name: customer_name });
+    setIsIgMessageOpen(true);
+  };
+
   // Fetch Media Requests (merging Instagram and Webchat)
   const mediaQuery = useQuery({
     queryKey: ["media-requests"],
@@ -104,7 +149,7 @@ function MediaRequestsPage() {
       const [publicRes, webchatItems] = await Promise.all([
         supabase
           .from("media_requests")
-          .select("*")
+          .select("*, customers(instagram_user_id)")
           .order("created_at", { ascending: false }),
         fetchWebchatMediaRequests(),
       ]);
@@ -735,6 +780,7 @@ function MediaRequestsPage() {
                 incrementContactMutation.mutate({ ids, currentAttempts })
               }
               onCopy={copyToClipboard}
+              onOpenIgMessage={handleOpenIgMessage}
               isUpdating={
                 updateStatusMutation.isPending ||
                 incrementContactMutation.isPending
@@ -761,6 +807,7 @@ function MediaRequestsPage() {
                 })
               }
               onCopy={copyToClipboard}
+              onOpenIgMessage={handleOpenIgMessage}
               isUpdating={
                 updateStatusMutation.isPending ||
                 incrementContactMutation.isPending
@@ -812,6 +859,42 @@ function MediaRequestsPage() {
           </div>
         </DialogContent>
       </Dialog>
+
+      {/* Instagram Message Dialog */}
+      <Dialog open={isIgMessageOpen} onOpenChange={setIsIgMessageOpen}>
+        <DialogContent className="sm:max-w-[425px]">
+          <DialogHeader>
+            <DialogTitle>Send Instagram Message</DialogTitle>
+            <DialogDescription className="text-xs">
+              Sending a message to {igMessageCustomer?.display_name || "Instagram User"}
+            </DialogDescription>
+          </DialogHeader>
+          <div className="grid gap-4 py-4">
+            <div className="grid gap-1.5">
+              <Label htmlFor="ig-message">Message</Label>
+              <Textarea
+                id="ig-message"
+                placeholder="Type your message here..."
+                rows={4}
+                value={igMessageText}
+                onChange={(e) => setIgMessageText(e.target.value)}
+              />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="ghost" size="sm" onClick={() => setIsIgMessageOpen(false)}>
+              Cancel
+            </Button>
+            <Button
+              size="sm"
+              onClick={() => sendIgMessageMutation.mutate()}
+              disabled={sendIgMessageMutation.isPending || !igMessageText.trim()}
+            >
+              {sendIgMessageMutation.isPending ? "Sending..." : "Send"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </AppShell>
   );
 }
@@ -827,6 +910,7 @@ function PatientChatThreadCard({
   onToggleStatus,
   onIncrementContact,
   onCopy,
+  onOpenIgMessage,
   isUpdating,
 }: {
   group: PatientGroup;
@@ -838,6 +922,7 @@ function PatientChatThreadCard({
   ) => void;
   onIncrementContact: (ids: string[], currentAttempts: number) => void;
   onCopy: (text: string, label: string) => void;
+  onOpenIgMessage: (id: string, name: string) => void;
   isUpdating: boolean;
 }) {
   const isResolved = group.allResolved;
@@ -942,6 +1027,15 @@ function PatientChatThreadCard({
                 </>
               ) : (
                 <span className="italic text-muted-foreground/70">No phone provided</span>
+              )}
+              {group.source !== "webchat" && group.items[0]?.customers?.instagram_user_id && (
+                <button
+                  onClick={() => onOpenIgMessage(group.items[0].customers.instagram_user_id, name)}
+                  className="inline-flex items-center gap-1 rounded bg-pink-500/10 px-2 py-0.5 text-pink-600 dark:text-pink-400 hover:bg-pink-500/20 text-[11px] font-medium transition-colors ml-1"
+                  title="Send Message on Instagram"
+                >
+                  <Instagram className="h-3 w-3" /> Send DM
+                </button>
               )}
             </div>
           </div>
@@ -1181,6 +1275,7 @@ function IndividualMediaCard({
   onToggleStatus,
   onIncrementContact,
   onCopy,
+  onOpenIgMessage,
   isUpdating,
 }: {
   item: MediaRequest;
@@ -1189,6 +1284,7 @@ function IndividualMediaCard({
   onToggleStatus: (newStatus: "RESOLVED" | "CONTACTED" | "PENDING_STAFF") => void;
   onIncrementContact: () => void;
   onCopy: (text: string, label: string) => void;
+  onOpenIgMessage: (id: string, name: string) => void;
   isUpdating: boolean;
 }) {
   const mediaType = (item.media_type || "image").toLowerCase();
@@ -1262,6 +1358,15 @@ function IndividualMediaCard({
                 </>
               ) : (
                 <span className="italic text-muted-foreground/70">No phone provided</span>
+              )}
+              {item.source !== "webchat" && item.customers?.instagram_user_id && (
+                <button
+                  onClick={() => onOpenIgMessage(item.customers.instagram_user_id, name)}
+                  className="inline-flex items-center gap-1 rounded bg-pink-500/10 px-2 py-0.5 text-pink-600 dark:text-pink-400 hover:bg-pink-500/20 text-[11px] font-medium transition-colors ml-1"
+                  title="Send Message on Instagram"
+                >
+                  <Instagram className="h-3 w-3" /> Send DM
+                </button>
               )}
             </div>
           </div>

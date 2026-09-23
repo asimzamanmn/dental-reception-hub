@@ -1,0 +1,95 @@
+{
+  "name": "Send Instagram Message from Dashboard",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "ig-send",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "webhook-trigger",
+      "name": "Webhook POST",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "position": [ 0, 0 ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT access_token FROM meta_tokens WHERE id=1;"
+      },
+      "id": "fetch-token",
+      "name": "Fetch Meta Token",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [ 200, 0 ],
+      "credentials": {
+        "postgres": {
+          "id": "VmXIwfAMcM9HM6UU",
+          "name": "Postgres account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://graph.instagram.com/v25.0/17841444826903214/messages",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $json.access_token }}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "raw",
+        "rawContentType": "application/json",
+        "body": "={{ JSON.stringify({ recipient: { id: $('Webhook POST').item.json.body.instagram_user_id }, message: { text: $('Webhook POST').item.json.body.message_text } }) }}",
+        "options": {}
+      },
+      "id": "send-message",
+      "name": "Send Instagram Message",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [ 400, 0 ]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "{\"status\":\"sent\"}",
+        "options": {
+          "responseCode": 200
+        }
+      },
+      "id": "respond",
+      "name": "Acknowledge",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [ 600, 0 ]
+    }
+  ],
+  "connections": {
+    "Webhook POST": {
+      "main": [
+        [ { "node": "Fetch Meta Token", "type": "main", "index": 0 } ]
+      ]
+    },
+    "Fetch Meta Token": {
+      "main": [
+        [ { "node": "Send Instagram Message", "type": "main", "index": 0 } ]
+      ]
+    },
+    "Send Instagram Message": {
+      "main": [
+        [ { "node": "Acknowledge", "type": "main", "index": 0 } ]
+      ]
+    }
+  }
+}
